@@ -193,10 +193,18 @@ h1, h2, h3, p, label, span, div {
   margin-bottom: 14px;
 }
 .siri-line {
-  height: 4px;
+  height: 0;
   border-radius: 999px;
-  margin: 12px 0 4px;
-  background: linear-gradient(90deg, #67e8f9, #7c9cff, #c084fc, #f472b6, #fb7185, #facc15, #4ade80);
+  margin: 8px 0 2px;
+}
+@keyframes siriFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes siriPulse {
+  0%, 100% { opacity: .72; transform: scaleX(.96); }
+  50% { opacity: 1; transform: scaleX(1); }
 }
 .stButton > button, .stDownloadButton > button {
   border-radius: 999px !important;
@@ -211,12 +219,44 @@ h1, h2, h3, p, label, span, div {
   background: #f8fbff !important;
 }
 [data-testid="stChatInput"] {
-  border-radius: 30px;
+  position: relative;
+  border-radius: 34px !important;
+  padding: 2px !important;
+  background: linear-gradient(100deg, #67e8f9, #60a5fa, #a78bfa, #f472b6, #fb7185, #facc15, #4ade80, #67e8f9);
+  background-size: 320% 320%;
+  animation: siriFlow 7s ease-in-out infinite;
+  box-shadow: 0 18px 52px rgba(17, 24, 39, .10), 0 0 24px rgba(124, 58, 237, .14);
+}
+[data-testid="stChatInput"] > div {
+  border-radius: 32px !important;
+  background: rgba(255, 255, 255, .96) !important;
+  overflow: hidden;
+}
+[data-testid="stChatInput"]::after {
+  content: "";
+  position: absolute;
+  left: 24px;
+  right: 78px;
+  bottom: 7px;
+  height: 3px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: linear-gradient(90deg, #67e8f9, #60a5fa, #a78bfa, #f472b6, #fb7185, #facc15, #4ade80);
+  background-size: 260% 260%;
+  animation: siriFlow 4s ease-in-out infinite, siriPulse 2.8s ease-in-out infinite;
+  filter: saturate(1.14);
 }
 [data-testid="stChatInput"] textarea {
-  border-radius: 30px !important;
-  border: 1px solid #d8dde7 !important;
-  box-shadow: 0 18px 48px rgba(17, 24, 39, .09) !important;
+  min-height: 58px !important;
+  border-radius: 32px !important;
+  border: 0 !important;
+  background: rgba(255,255,255,.96) !important;
+  box-shadow: inset 0 0 0 1px rgba(216, 224, 236, .86) !important;
+  padding-bottom: 17px !important;
+}
+[data-testid="stChatInput"] textarea:focus {
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, .24), 0 0 0 0 transparent !important;
+  outline: none !important;
 }
 .source-item {
   color: var(--muted);
