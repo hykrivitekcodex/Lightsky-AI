@@ -8,19 +8,13 @@ tools.
 
 ```powershell
 py -m pip install -r requirements.txt
-py LightSky_AI.py
+py -m streamlit run streamlit_app.py
 ```
 
 The Streamlit app runs on:
 
 ```text
 http://localhost:8501/
-```
-
-The legacy Tk UI is still available only for local compatibility:
-
-```powershell
-py LightSky_AI.py --tk
 ```
 
 ## Hosted Streamlit

@@ -1018,8 +1018,8 @@ Input:
 def settings_screen(route):
     render_header(route)
     st.markdown("### Settings")
-    st.write("Launch legacy Tk UI with:")
-    st.code("py LightSky_AI.py --tk", language="powershell")
+    st.write("Launch the Streamlit app locally with:")
+    st.code("py -m streamlit run streamlit_app.py", language="powershell")
     st.markdown("#### Providers")
     rows = [
         ("Groq", True, len(core.MODELS)),
