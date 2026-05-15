@@ -18,6 +18,16 @@ from io import BytesIO
 import requests
 from PIL import Image
 
+SAFARI_HTTP_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15 LightskyAI/1.0"
+)
+DEFAULT_WEB_HEADERS = {
+    "User-Agent": SAFARI_HTTP_USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 try:
     from huggingface_hub import HfApi, InferenceClient
     HAS_HUGGINGFACE_HUB = True
@@ -689,7 +699,7 @@ def _ls51_duckduckgo_search(query: str, max_results: int = 5) -> list[dict]:
     except Exception:
         pass
 
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LightskyAI/1.0"}
+    headers = DEFAULT_WEB_HEADERS
     try:
         url = "https://duckduckgo.com/html/?q=" + urllib.parse.quote(query[:320])
         res = requests.get(url, headers=headers, timeout=16)
@@ -729,7 +739,7 @@ def _ls51_fetch_page_summary(url: str, max_chars: int = 1400):
     try:
         response = requests.get(
             url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LightskyAI/1.0"},
+            headers=DEFAULT_WEB_HEADERS,
             timeout=16,
         )
         if response.status_code != 200:

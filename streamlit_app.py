@@ -91,6 +91,16 @@ DESKTOP_APP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/d
 DESKTOP_SETUP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/download/v3.0/LightskyAIProSetup.exe"
 DESKTOP_SETUP_SHA256 = "9BE6BE2FBB481C6FDCEBD2E0278ABC3D2C87536815187BBA0FC0EABCC80CCFD5"
 DESKTOP_APP_SHA256 = "7E8BF69176EE145EB7C186D84D992B046CF929940CBA965A25F57A39A2FC4BD7"
+HOSTED_APP_URL = "https://lightsky-ai-krivi.streamlit.app/?startup=done"
+SAFARI_HTTP_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15 LightskyAI/1.0"
+)
+DEFAULT_HTTP_HEADERS = {
+    "User-Agent": SAFARI_HTTP_USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 for folder in (DOWNLOAD_DIR, PLUGIN_DIR, GENERATED_DIR, INTERTEST_DIR):
     folder.mkdir(exist_ok=True)
@@ -125,6 +135,8 @@ CSS = """
               radial-gradient(circle at 90% 10%, rgba(219,39,119,.08), transparent 30%),
               var(--bg);
   color: var(--text);
+  min-height: 100svh;
+  -webkit-text-size-adjust: 100%;
 }
 [data-testid="stHeader"],
 [data-testid="stToolbar"],
@@ -178,6 +190,7 @@ h1, h2, h3, p, label, span, div {
   background: rgba(255,255,255,.82);
   box-shadow: 0 18px 46px rgba(17, 24, 39, .07);
   backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .hero::after {
   content: "";
@@ -235,6 +248,7 @@ h1, h2, h3, p, label, span, div {
   border-radius: 22px;
   background: rgba(255,255,255,.88);
   box-shadow: 0 14px 34px rgba(17, 24, 39, .055);
+  -webkit-transform: translateZ(0);
 }
 .status-card {
   padding: 12px 14px;
@@ -377,6 +391,7 @@ h1, h2, h3, p, label, span, div {
   margin: 10px 0 14px;
   background: linear-gradient(rgba(255,255,255,.92), rgba(255,255,255,.92)) padding-box, var(--siri-gradient) border-box;
   box-shadow: 0 12px 30px rgba(17, 24, 39, .06);
+  -webkit-transform: translateZ(0);
 }
 .account-name {
   color: #172033;
@@ -513,6 +528,25 @@ h1, h2, h3, p, label, span, div {
   .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .hero { align-items: flex-start; flex-direction: column; }
 }
+@supports (-webkit-touch-callout: none) {
+  .main .block-container {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-bottom: max(4rem, env(safe-area-inset-bottom));
+  }
+  [data-testid="stTextInput"] input,
+  [data-testid="stTextArea"] textarea,
+  [data-testid="stChatInput"] textarea,
+  [data-testid="stSelectbox"] * {
+    font-size: 16px !important;
+  }
+  [data-testid="stChatInput"] {
+    margin-bottom: max(.4rem, env(safe-area-inset-bottom));
+  }
+  .lightsky-browser-safari [data-testid="stSidebar"] {
+    -webkit-overflow-scrolling: touch;
+  }
+}
 </style>
 """
 
@@ -568,11 +602,48 @@ def render_startup_screen():
     st.rerun()
 
 
-def render_iframe(url, height=680, scrolling=True):
-    try:
-        components.iframe(url, height=height, scrolling=scrolling)
-    except TypeError:
-        components.iframe(url, height=height)
+def render_iframe(url, height=680):
+    safe_url = escape_text(url)
+    components.html(
+        f"""
+        <style>
+        html, body {{
+          margin: 0;
+          padding: 0;
+          background: transparent;
+          -webkit-text-size-adjust: 100%;
+        }}
+        .lightsky-frame-shell {{
+          width: 100%;
+          height: {int(height)}px;
+          overflow: hidden;
+          border-radius: 24px;
+          border: 1px solid rgba(223, 230, 241, .96);
+          background: #fff;
+          box-shadow: 0 12px 34px rgba(17, 24, 39, .06);
+          -webkit-overflow-scrolling: touch;
+        }}
+        iframe {{
+          display: block;
+          width: 100%;
+          height: 100%;
+          border: 0;
+          background: #fff;
+        }}
+        </style>
+        <div class="lightsky-frame-shell">
+          <iframe
+            src="{safe_url}"
+            title="Lightsky browser preview"
+            loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade"
+            allow="clipboard-read; clipboard-write; encrypted-media; fullscreen; microphone; camera"
+            sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
+          ></iframe>
+        </div>
+        """,
+        height=height + 8,
+    )
 
 
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -597,6 +668,29 @@ def get_query_value(name):
             return str(values[0]) if values else ""
         except Exception:
             return ""
+
+
+def render_browser_compatibility_bridge():
+    components.html(
+        """
+        <script>
+        (() => {
+          const ua = navigator.userAgent || "";
+          const isSafari = /Safari/i.test(ua) && !/(Chrome|Chromium|CriOS|Edg|OPR|Firefox|FxiOS)/i.test(ua);
+          const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+          try {
+            const root = window.parent?.document?.documentElement || document.documentElement;
+            root.classList.toggle("lightsky-browser-safari", isSafari);
+            root.classList.toggle("lightsky-browser-ios", isIOS);
+            root.dataset.lightskyBrowser = isSafari ? "safari" : "standard";
+            root.dataset.lightskyMobile = isIOS ? "ios" : "desktop";
+          } catch (error) {}
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def clear_auth_query_params():
@@ -789,9 +883,21 @@ def render_session_storage_bridge():
         <script>
         (() => {{
           const payload = {payload};
+          function usableStorage(name) {{
+            try {{
+              const target = (window.parent || window)[name] || window[name];
+              const testKey = `${{payload.key}}_test`;
+              target.setItem(testKey, "1");
+              target.removeItem(testKey);
+              return target;
+            }} catch (error) {{
+              return null;
+            }}
+          }}
           try {{
             const parentWindow = window.parent || window;
-            const storage = parentWindow.localStorage || window.localStorage;
+            const storage = usableStorage("localStorage") || usableStorage("sessionStorage");
+            if (!storage) return;
             if (payload.action === "set" && payload.token) {{
               storage.setItem(payload.key, payload.token);
             }}
@@ -1418,26 +1524,29 @@ def chat_screen(route):
 def render_desktop_download_panel(compact=False):
     if compact:
         st.link_button("Download desktop app", DESKTOP_APP_EXE_URL, use_container_width=True)
-        st.caption("Windows EXE from the official v3.0 GitHub release.")
+        st.link_button("Open web app", HOSTED_APP_URL, use_container_width=True)
+        st.caption("Windows EXE plus Safari-friendly hosted web app.")
         return
 
     st.markdown(
         f"""
         <div class="soft-card">
           <div class="account-name">Download Lightsky AI for Windows</div>
-          <div class="account-email">Get the desktop app from the official v3.0 release.</div>
+          <div class="account-email">Get the desktop app from the official v3.0 release, or open the hosted app in Safari.</div>
           <div class="account-provider">{escape_text(DESKTOP_RELEASE_URL.replace('https://', ''))}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.link_button("Download desktop app", DESKTOP_APP_EXE_URL, use_container_width=True)
     with col2:
         st.link_button("Download setup", DESKTOP_SETUP_EXE_URL, use_container_width=True)
     with col3:
         st.link_button("Open release page", DESKTOP_RELEASE_URL, use_container_width=True)
+    with col4:
+        st.link_button("Open in Safari / web", HOSTED_APP_URL, use_container_width=True)
     with st.expander("Verify downloads"):
         st.code(
             f"LightskyAIPro.exe SHA256\n{DESKTOP_APP_SHA256}\n\n"
@@ -1642,7 +1751,7 @@ def browser_google_search(query, limit=6):
                 num=limit,
                 stop=limit,
                 pause=1.0,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) LightskyAI/1.0",
+                user_agent=SAFARI_HTTP_USER_AGENT,
             )
         except TypeError:
             urls = google_search(query, num_results=limit)
@@ -1717,12 +1826,12 @@ def browser_screen(route):
     else:
         st.caption(
             "Google search uses the installed `google` package when available. "
-            "Embedded browsing works only when the site allows iframes."
+            "Embedded browsing works only when the site allows iframes; Safari users can always open the page directly."
         )
 
     url = st.session_state.browser_url
-    st.link_button("Open current page in real browser", url)
-    render_iframe(url, height=680, scrolling=True)
+    st.link_button("Open current page in Safari / browser", url)
+    render_iframe(url, height=680)
 
 
 FILE_EXTENSIONS = (".exe", ".msi", ".zip", ".pdf", ".whl", ".msix", ".apk", ".dmg", ".pkg", ".tar.gz", ".7z", ".rar")
@@ -1730,14 +1839,14 @@ FILE_EXTENSIONS = (".exe", ".msi", ".zip", ".pdf", ".whl", ".msix", ".apk", ".dm
 
 def resolve_download_url(url):
     try:
-        head = requests.head(url, allow_redirects=True, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        head = requests.head(url, allow_redirects=True, timeout=15, headers=DEFAULT_HTTP_HEADERS)
         content_type = head.headers.get("content-type", "").lower()
         final = head.url
         if any(final.lower().split("?")[0].endswith(ext) for ext in FILE_EXTENSIONS) or "text/html" not in content_type:
             return final
     except Exception:
         pass
-    response = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+    response = requests.get(url, timeout=20, headers=DEFAULT_HTTP_HEADERS)
     response.raise_for_status()
     links = re.findall(r'href=["\']([^"\']+)["\']', response.text, flags=re.I)
     for link in links:
@@ -1747,13 +1856,27 @@ def resolve_download_url(url):
     return url
 
 
+def filename_from_response(response, fallback_url):
+    disposition = response.headers.get("content-disposition", "")
+    filename = ""
+    match = re.search(r"filename\*=UTF-8''([^;]+)", disposition, re.I)
+    if match:
+        filename = urllib.parse.unquote(match.group(1).strip().strip('"'))
+    if not filename:
+        match = re.search(r'filename="?([^";]+)"?', disposition, re.I)
+        if match:
+            filename = match.group(1).strip()
+    if not filename:
+        parsed = urllib.parse.urlparse(fallback_url)
+        filename = os.path.basename(parsed.path) or "download.bin"
+    return re.sub(r"[^A-Za-z0-9._-]", "_", filename) or "download.bin"
+
+
 def download_file(url):
     final_url = resolve_download_url(url)
-    response = requests.get(final_url, stream=True, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
+    response = requests.get(final_url, stream=True, timeout=60, headers=DEFAULT_HTTP_HEADERS)
     response.raise_for_status()
-    parsed = urllib.parse.urlparse(response.url)
-    filename = os.path.basename(parsed.path) or "download.bin"
-    filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
+    filename = filename_from_response(response, response.url)
     dest = DOWNLOAD_DIR / filename
     total = 0
     with open(dest, "wb") as f:
@@ -1803,7 +1926,16 @@ def look_take_screen(route):
                 st.error(f"Download failed: {e}")
 
     if st.session_state.last_download:
-        st.info(f"Last download: {st.session_state.last_download}")
+        last_path = Path(st.session_state.last_download)
+        st.info(f"Last download: {last_path}")
+        if last_path.exists() and last_path.is_file():
+            st.download_button(
+                "Save downloaded file in Safari / browser",
+                last_path.read_bytes(),
+                file_name=last_path.name,
+                mime="application/octet-stream",
+                use_container_width=True,
+            )
     with st.expander("Details", expanded=bool(st.session_state.look_details)):
         st.text(st.session_state.look_details or "No details yet.")
 
@@ -2067,6 +2199,7 @@ def main():
         render_startup_screen()
         return
 
+    render_browser_compatibility_bridge()
     render_session_storage_bridge()
 
     with st.sidebar:

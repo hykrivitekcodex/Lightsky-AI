@@ -1,0 +1,29 @@
+name: iOS source check
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-source-check.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-source-check.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate iOS source package
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run iOS source check
+        run: python ios/LightskyAIPro/scripts/validate_ios_project.py

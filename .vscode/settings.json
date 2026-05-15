@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "py",
+  "python.terminal.activateEnvironment": false,
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.streamlit/secrets.toml": true,
+    "**/lightsky_accounts.json": true,
+    "**/lightsky_sessions.json": true
+  }
+}

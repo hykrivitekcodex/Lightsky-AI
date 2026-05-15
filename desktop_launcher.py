@@ -1,8 +1,10 @@
 import os
+import platform
 import socket
 import subprocess
 import sys
 import time
+import webbrowser
 from pathlib import Path
 
 
@@ -29,6 +31,8 @@ def candidate_app_browsers():
         Path(program_files) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
         Path(program_files) / "Google" / "Chrome" / "Application" / "chrome.exe",
         Path(program_files_x86) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(program_files) / "Safari" / "Safari.exe",
+        Path(program_files_x86) / "Safari" / "Safari.exe",
     ]
 
 
@@ -88,9 +92,17 @@ def start_streamlit(port):
 
 
 def open_native_app_window(url):
+    if platform.system() == "Darwin":
+        safari = Path("/Applications/Safari.app")
+        if safari.exists():
+            return subprocess.Popen(["open", "-a", "Safari", url], cwd=APP_DIR)
+        webbrowser.open(url)
+        return None
+
     app_browser = find_app_browser()
     if not app_browser:
-        raise RuntimeError("Microsoft Edge or Chrome is required for the Lightsky AI desktop window.")
+        webbrowser.open(url)
+        return None
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     profile_dir = DATA_DIR / "native_window_profile"
@@ -117,7 +129,11 @@ def main():
     url = f"http://{HOST}:{port}/?startup=done"
     window_process = open_native_app_window(url)
     try:
-        window_process.wait()
+        if window_process is not None:
+            window_process.wait()
+        else:
+            while process.poll() is None:
+                time.sleep(1)
     finally:
         process.terminate()
 

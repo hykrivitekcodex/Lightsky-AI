@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Lightsky: run Streamlit app",
+      "type": "shell",
+      "command": "py",
+      "args": [
+        "-m",
+        "streamlit",
+        "run",
+        "streamlit_app.py",
+        "--server.headless",
+        "false"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lightsky iOS: validate source",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "ios/LightskyAIPro/Validate-Source.ps1"
+      ],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lightsky iOS: package source",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "ios/LightskyAIPro/Package-Source.ps1"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lightsky iOS: validate and package",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Lightsky iOS: validate source",
+        "Lightsky iOS: package source"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
