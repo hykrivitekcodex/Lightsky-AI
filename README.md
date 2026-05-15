@@ -2,7 +2,7 @@
 
 Streamlit-first Lightsky AI app with chat, arena, visual browser, Look & Take,
 image generation, GitHub plugin discovery, internal testing, and LS 5.1 debug
-tools.
+tools. Labs collaboration is shown at `https://lightsky-ai-krivi.streamlit.app/labs`.
 
 ## Run Locally
 
@@ -29,6 +29,16 @@ Supported secret names:
 - `HF_TOKEN` or `HUGGINGFACE_TOKEN`
 - `XAI_API_KEY`
 - `NVIDIA_API_KEY`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI`
+
+For Google sign-in, create a Google OAuth client for a web application and set
+`GOOGLE_REDIRECT_URI` to the exact app URL, for example
+`http://localhost:8501/` or your hosted Streamlit URL.
+
+Email/password sign-in stores local account records in `lightsky_accounts.json`
+using salted PBKDF2 password hashes. That file is ignored by git.
 
 Do not commit `.streamlit/secrets.toml`, logs, downloads, generated images, or
 local cookies.

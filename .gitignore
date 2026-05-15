@@ -3,6 +3,7 @@ __pycache__/
 *.log
 .google-cookie
 .streamlit/secrets.toml
+lightsky_accounts.json
 downloads/
 generated_images/
 intertest_runs/

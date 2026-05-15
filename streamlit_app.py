@@ -1,7 +1,12 @@
 import io
 import json
+import html
+import base64
+import hashlib
+import hmac
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -42,6 +47,9 @@ def _load_streamlit_secrets_to_env():
         "NVIDIA_API_KEY",
         "NVIDIA_NIM_API_KEY",
         "NVIDIA_NGC_API_KEY",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_REDIRECT_URI",
     ]
     try:
         secrets = st.secrets
@@ -71,6 +79,9 @@ DOWNLOAD_DIR = APP_DIR / "downloads"
 PLUGIN_DIR = APP_DIR / "github_plugins"
 GENERATED_DIR = APP_DIR / "generated_images"
 INTERTEST_DIR = APP_DIR / "intertest_runs"
+ACCOUNT_STORE = APP_DIR / "lightsky_accounts.json"
+LABS_URL = "https://lightsky-ai-krivi.streamlit.app/labs"
+LABS_EMAIL = "krivi.ezhil@gmail.com"
 
 for folder in (DOWNLOAD_DIR, PLUGIN_DIR, GENERATED_DIR, INTERTEST_DIR):
     folder.mkdir(exist_ok=True)
@@ -194,7 +205,7 @@ h1, h2, h3, p, label, span, div {
 }
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin: 14px 0 18px;
 }
@@ -339,6 +350,54 @@ h1, h2, h3, p, label, span, div {
 [data-testid="stChatInput"] textarea:focus {
   box-shadow: inset 0 0 0 1px rgba(124, 58, 237, .24), 0 0 0 0 transparent !important;
   outline: none !important;
+}
+.account-pill {
+  border: 1px solid transparent;
+  border-radius: 22px;
+  padding: 12px 13px;
+  margin: 10px 0 14px;
+  background: linear-gradient(rgba(255,255,255,.92), rgba(255,255,255,.92)) padding-box, var(--siri-gradient) border-box;
+  box-shadow: 0 12px 30px rgba(17, 24, 39, .06);
+}
+.account-name {
+  color: #172033;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.account-email {
+  color: #687386;
+  font-size: .82rem;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-provider {
+  display: inline-flex;
+  margin-top: 9px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #172033;
+  background: rgba(238,242,248,.88);
+  font-size: .74rem;
+  font-weight: 760;
+}
+.google-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: linear-gradient(#fff, #fff) padding-box, var(--siri-gradient) border-box;
+  color: #172033 !important;
+  text-decoration: none !important;
+  font-weight: 780;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, .07);
+}
+.google-link:hover {
+  animation: siriFlow 5s ease-in-out infinite;
 }
 .startup-shell {
   min-height: calc(100vh - 2.4rem);
@@ -491,10 +550,278 @@ def render_startup_screen():
 
 
 def render_iframe(url, height=680, scrolling=True):
-    if hasattr(st, "iframe"):
-        st.iframe(url, height=height, scrolling=scrolling)
-    else:
+    try:
         components.iframe(url, height=height, scrolling=scrolling)
+    except TypeError:
+        components.iframe(url, height=height)
+
+
+GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
+GOOGLE_SCOPE = "openid email profile"
+
+
+def escape_text(value):
+    return html.escape(str(value or ""), quote=True)
+
+
+def get_query_value(name):
+    try:
+        value = st.query_params.get(name)
+        if isinstance(value, list):
+            return str(value[0]) if value else ""
+        return str(value or "")
+    except Exception:
+        try:
+            values = st.experimental_get_query_params().get(name, [""])
+            return str(values[0]) if values else ""
+        except Exception:
+            return ""
+
+
+def clear_auth_query_params():
+    try:
+        st.query_params.clear()
+        st.query_params["startup"] = "done"
+        return
+    except Exception:
+        pass
+    try:
+        st.experimental_set_query_params(startup="done")
+    except Exception:
+        pass
+
+
+def google_oauth_config():
+    return {
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", "").strip(),
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", "").strip(),
+        "redirect_uri": os.environ.get("GOOGLE_REDIRECT_URI", "").strip() or "http://localhost:8501/",
+    }
+
+
+def google_oauth_ready():
+    cfg = google_oauth_config()
+    return bool(cfg["client_id"] and cfg["client_secret"] and cfg["redirect_uri"])
+
+
+def build_google_signin_url():
+    if not google_oauth_ready():
+        return "#"
+    state = st.session_state.get("google_oauth_state") or secrets.token_urlsafe(24)
+    st.session_state.google_oauth_state = state
+    cfg = google_oauth_config()
+    params = {
+        "client_id": cfg["client_id"],
+        "redirect_uri": cfg["redirect_uri"],
+        "response_type": "code",
+        "scope": GOOGLE_SCOPE,
+        "state": state,
+        "prompt": "select_account",
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+    }
+    return f"{GOOGLE_AUTH_ENDPOINT}?{urllib.parse.urlencode(params)}"
+
+
+def google_signin_link(label="Sign in with Google"):
+    if not google_oauth_ready():
+        return ""
+    url = escape_text(build_google_signin_url())
+    return f'<a class="google-link" href="{url}" target="_self"><b>G</b> {escape_text(label)}</a>'
+
+
+def current_user():
+    return st.session_state.get("auth_user")
+
+
+def sign_out():
+    st.session_state.auth_user = None
+    st.session_state.auth_error = ""
+    st.session_state.google_oauth_state = ""
+    st.rerun()
+
+
+def normalize_email(email):
+    return str(email or "").strip().lower()
+
+
+def valid_email(email):
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalize_email(email)))
+
+
+def load_account_store():
+    if not ACCOUNT_STORE.exists():
+        return {"accounts": {}}
+    try:
+        data = json.loads(ACCOUNT_STORE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"accounts": {}}
+    if not isinstance(data, dict):
+        return {"accounts": {}}
+    accounts = data.get("accounts")
+    if not isinstance(accounts, dict):
+        data["accounts"] = {}
+    return data
+
+
+def save_account_store(data):
+    ACCOUNT_STORE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def hash_password(password, salt=None):
+    salt_bytes = base64.b64decode(salt) if salt else secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", str(password).encode("utf-8"), salt_bytes, 260000)
+    return {
+        "salt": base64.b64encode(salt_bytes).decode("ascii"),
+        "hash": base64.b64encode(digest).decode("ascii"),
+        "algorithm": "pbkdf2_sha256",
+    }
+
+
+def verify_password(password, account):
+    password_hash = account.get("password_hash", {})
+    if password_hash.get("algorithm") != "pbkdf2_sha256":
+        return False
+    expected = password_hash.get("hash", "")
+    candidate = hash_password(password, password_hash.get("salt")).get("hash", "")
+    return hmac.compare_digest(candidate, expected)
+
+
+def sign_in_email_account(email, password):
+    email = normalize_email(email)
+    if not valid_email(email):
+        return False, "Type a valid email address."
+    if not password:
+        return False, "Type your password."
+    account = load_account_store().get("accounts", {}).get(email)
+    if not account or not verify_password(password, account):
+        return False, "Email or password is wrong."
+    st.session_state.auth_user = {
+        "provider": "Email",
+        "name": account.get("name") or email.split("@")[0],
+        "email": email,
+        "picture": "",
+        "sub": email,
+        "signed_in_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    st.session_state.auth_error = ""
+    return True, ""
+
+
+def create_email_account(name, email, password, confirm_password):
+    email = normalize_email(email)
+    if not valid_email(email):
+        return False, "Type a valid email address."
+    if len(password or "") < 8:
+        return False, "Use at least 8 characters for the password."
+    if password != confirm_password:
+        return False, "Passwords do not match."
+    data = load_account_store()
+    accounts = data.setdefault("accounts", {})
+    if email in accounts:
+        return False, "That email account already exists. Sign in instead."
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    accounts[email] = {
+        "name": str(name or "").strip() or email.split("@")[0],
+        "email": email,
+        "password_hash": hash_password(password),
+        "created_at": now,
+    }
+    save_account_store(data)
+    st.session_state.auth_user = {
+        "provider": "Email",
+        "name": accounts[email]["name"],
+        "email": email,
+        "picture": "",
+        "sub": email,
+        "signed_in_at": now,
+    }
+    st.session_state.auth_error = ""
+    return True, ""
+
+
+def process_google_oauth_callback():
+    oauth_error = get_query_value("error")
+    code = get_query_value("code")
+    if not oauth_error and not code:
+        return
+
+    if oauth_error:
+        description = get_query_value("error_description") or oauth_error
+        st.session_state.auth_error = f"Google sign-in stopped: {description}"
+        st.session_state.google_oauth_state = ""
+        clear_auth_query_params()
+        st.rerun()
+
+    if not google_oauth_ready():
+        st.session_state.auth_error = "Google sign-in needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI."
+        st.session_state.google_oauth_state = ""
+        clear_auth_query_params()
+        st.rerun()
+
+    expected_state = st.session_state.get("google_oauth_state")
+    returned_state = get_query_value("state")
+    if not expected_state or returned_state != expected_state:
+        st.session_state.auth_error = "Google sign-in could not be verified. Please try again."
+        st.session_state.google_oauth_state = ""
+        clear_auth_query_params()
+        st.rerun()
+
+    cfg = google_oauth_config()
+    try:
+        token_response = requests.post(
+            GOOGLE_TOKEN_ENDPOINT,
+            data={
+                "client_id": cfg["client_id"],
+                "client_secret": cfg["client_secret"],
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": cfg["redirect_uri"],
+            },
+            headers={"Accept": "application/json"},
+            timeout=25,
+        )
+        try:
+            token_payload = token_response.json()
+        except ValueError:
+            token_payload = {}
+        if token_response.status_code >= 400:
+            message = token_payload.get("error_description") or token_payload.get("error") or f"HTTP {token_response.status_code}"
+            raise RuntimeError(message)
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            raise RuntimeError("Google did not return an access token.")
+
+        profile_response = requests.get(
+            GOOGLE_USERINFO_ENDPOINT,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            timeout=25,
+        )
+        try:
+            profile = profile_response.json()
+        except ValueError:
+            profile = {}
+        if profile_response.status_code >= 400:
+            message = profile.get("error_description") or profile.get("error") or f"HTTP {profile_response.status_code}"
+            raise RuntimeError(message)
+
+        st.session_state.auth_user = {
+            "provider": "Google",
+            "name": profile.get("name") or profile.get("given_name") or profile.get("email") or "Google user",
+            "email": profile.get("email", ""),
+            "picture": profile.get("picture", ""),
+            "sub": profile.get("sub", ""),
+            "signed_in_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        st.session_state.auth_error = ""
+    except Exception as exc:
+        st.session_state.auth_error = f"Google sign-in failed: {exc}"
+    finally:
+        st.session_state.google_oauth_state = ""
+        clear_auth_query_params()
+        st.rerun()
 
 
 def provider_display(provider):
@@ -797,13 +1124,16 @@ Now give the final answer. Use the test result directly. Do not request another 
 
 def status_cards(route):
     tool_status = "Inter-Test on" if st.session_state.get("ai_intertest_enabled", True) else "Inter-Test off"
+    user = current_user()
+    account_status = user.get("name") if user else "Guest mode"
     st.markdown(
         f"""
         <div class="status-grid">
-          <div class="status-card"><div class="status-label">Model</div><div class="status-value">{model_clean(route['display'])}</div></div>
-          <div class="status-card"><div class="status-label">Provider</div><div class="status-value">{provider_display(route['provider'])}</div></div>
+          <div class="status-card"><div class="status-label">Model</div><div class="status-value">{escape_text(model_clean(route['display']))}</div></div>
+          <div class="status-card"><div class="status-label">Provider</div><div class="status-value">{escape_text(provider_display(route['provider']))}</div></div>
+          <div class="status-card"><div class="status-label">Account</div><div class="status-value">{escape_text(account_status)}</div></div>
           <div class="status-card"><div class="status-label">Web</div><div class="status-value">available to all models</div></div>
-          <div class="status-card"><div class="status-label">Tools</div><div class="status-value">{tool_status}</div></div>
+          <div class="status-card"><div class="status-label">Tools</div><div class="status-value">{escape_text(tool_status)}</div></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -821,7 +1151,7 @@ def render_header(route):
               <div class="brand-subtitle">by Krivi</div>
             </div>
           </div>
-          <div style="color:#687386;font-weight:650;">{provider_display(route['provider'])} / {model_clean(route['display'])}</div>
+          <div style="color:#687386;font-weight:650;">{escape_text(provider_display(route['provider']))} / {escape_text(model_clean(route['display']))}</div>
         </div>
         <div class="siri-line"></div>
         """,
@@ -846,6 +1176,9 @@ def init_state():
     st.session_state.setdefault("last_download", None)
     st.session_state.setdefault("intertest_runs", [])
     st.session_state.setdefault("ai_intertest_enabled", True)
+    st.session_state.setdefault("auth_user", None)
+    st.session_state.setdefault("auth_error", "")
+    st.session_state.setdefault("google_oauth_state", "")
 
 
 def append_sources(response, sources):
@@ -886,6 +1219,125 @@ def chat_screen(route):
             "intertest": intertest_result,
         })
         st.rerun()
+
+
+def render_account_sidebar():
+    user = current_user()
+    if user:
+        st.markdown(
+            f"""
+            <div class="account-pill">
+              <div class="account-name">{escape_text(user.get('name') or 'Signed in')}</div>
+              <div class="account-email">{escape_text(user.get('email') or 'No email saved')}</div>
+              <div class="account-provider">{escape_text(user.get('provider') or 'Local')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign out", key="sidebar_sign_out", use_container_width=True):
+            sign_out()
+    else:
+        st.markdown(
+            """
+            <div class="account-pill">
+              <div class="account-name">Guest mode</div>
+              <div class="account-email">Sign in with email or Google.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if google_oauth_ready():
+            st.markdown(google_signin_link(), unsafe_allow_html=True)
+        else:
+            st.caption("Google sign-in needs OAuth secrets.")
+
+
+def account_screen(route):
+    render_header(route)
+    st.markdown("### Account")
+    if st.session_state.get("auth_error"):
+        st.error(st.session_state.auth_error)
+
+    user = current_user()
+    left, right = st.columns([1.15, 0.85])
+    with left:
+        st.markdown("#### Profile")
+        if user:
+            st.markdown(
+                f"""
+                <div class="soft-card">
+                  <div class="account-name">{escape_text(user.get('name') or 'Signed in')}</div>
+                  <div class="account-email">{escape_text(user.get('email') or 'No email saved')}</div>
+                  <div class="account-provider">{escape_text(user.get('provider') or 'Local')} account</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.caption(f"Signed in at {escape_text(user.get('signed_in_at', 'this session'))}")
+            if st.button("Sign out", key="account_sign_out", use_container_width=True):
+                sign_out()
+        else:
+            st.markdown(
+                """
+                <div class="soft-card">
+                  <div class="account-name">Sign in with your email account</div>
+                  <div class="account-email">Your password is stored locally as a salted hash, never plain text.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            signin_tab, create_tab = st.tabs(["Sign in", "Create account"])
+            with signin_tab:
+                email = st.text_input("Email", key="email_signin_email", placeholder="you@example.com")
+                password = st.text_input("Password", key="email_signin_password", type="password")
+                if st.button("Sign in with email", key="email_signin_submit", use_container_width=True):
+                    ok, message = sign_in_email_account(email, password)
+                    if ok:
+                        st.rerun()
+                    st.session_state.auth_error = message
+                    st.rerun()
+            with create_tab:
+                name = st.text_input("Name", key="email_create_name", placeholder="Krivi")
+                new_email = st.text_input("Email", key="email_create_email", placeholder="you@example.com")
+                new_password = st.text_input("Password", key="email_create_password", type="password")
+                confirm_password = st.text_input("Confirm password", key="email_create_confirm", type="password")
+                if st.button("Create email account", key="email_create_submit", use_container_width=True):
+                    ok, message = create_email_account(name, new_email, new_password, confirm_password)
+                    if ok:
+                        st.rerun()
+                    st.session_state.auth_error = message
+                    st.rerun()
+
+    with right:
+        st.markdown("#### Sign in with Google")
+        if google_oauth_ready():
+            st.markdown(google_signin_link("Continue with Google"), unsafe_allow_html=True)
+            st.caption(f"Redirect URI: {escape_text(google_oauth_config()['redirect_uri'])}")
+        else:
+            st.info("Google sign-in is wired. Add OAuth credentials in Streamlit secrets or environment variables to enable the button.")
+            st.code(
+                'GOOGLE_CLIENT_ID="your-google-client-id"\n'
+                'GOOGLE_CLIENT_SECRET="your-google-client-secret"\n'
+                'GOOGLE_REDIRECT_URI="http://localhost:8501/"',
+                language="toml",
+            )
+
+
+def labs_screen(route):
+    render_header(route)
+    st.markdown("### Labs")
+    st.markdown(
+        f"""
+        <div class="soft-card">
+          <div class="account-name">Lightsky Labs</div>
+          <div class="account-email">to join labs and collaborate with krivi send out an email to {escape_text(LABS_EMAIL)}</div>
+          <div class="account-provider">{escape_text(LABS_URL.replace('https://', ''))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.link_button("Open Labs link", LABS_URL, use_container_width=True)
+    st.link_button("Email Krivi", f"mailto:{LABS_EMAIL}", use_container_width=True)
 
 
 def arena_screen(route):
@@ -1379,11 +1831,13 @@ def settings_screen(route):
 
 
 def main():
+    init_state()
+    process_google_oauth_callback()
+
     if not startup_is_done():
         render_startup_screen()
         return
 
-    init_state()
     with st.sidebar:
         st.markdown("## \u2728 Lightsky AI")
         st.caption("pro by Krivi")
@@ -1391,9 +1845,10 @@ def main():
         default_index = model_names.index(core.DEFAULT_MODEL_DISPLAY) if core.DEFAULT_MODEL_DISPLAY in model_names else 0
         selected_model = st.selectbox("Model", model_names, index=default_index)
         route = route_from_display(selected_model)
+        render_account_sidebar()
         nav = st.radio(
             "Workspace",
-            ["Chat", "Arena", "Browser", "Look & Take", "Image Studio", "Plugin Center", "Inter-Test", "Debug LS 5.1", "Settings"],
+            ["Chat", "Account", "Labs", "Arena", "Browser", "Look & Take", "Image Studio", "Plugin Center", "Inter-Test", "Debug LS 5.1", "Settings"],
             label_visibility="collapsed",
         )
         st.markdown("---")
@@ -1403,6 +1858,10 @@ def main():
 
     if nav == "Chat":
         chat_screen(route)
+    elif nav == "Account":
+        account_screen(route)
+    elif nav == "Labs":
+        labs_screen(route)
     elif nav == "Arena":
         arena_screen(route)
     elif nav == "Browser":
