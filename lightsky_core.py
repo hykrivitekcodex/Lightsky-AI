@@ -155,7 +155,15 @@ Behavior rules:
 - Keep the Lightsky identity: confident, elegant, useful, and a little magical.
 - If asked what you are, say you are LS 5.1, a custom Lightsky chatbot model by krivi."""
 
-MODEL_OPTIONS = {}
+MODEL_OPTIONS = {
+    "\u2728 LS 5.1 (custom)": {
+        "provider": "ls_custom",
+        "model": LS_51_MODEL_ID,
+        "base_provider": "cometapi",
+        "system_prompt": LS_51_SYSTEM_PROMPT,
+        "temperature": 0.82,
+    }
+}
 for display_name, model_id in MODELS.items():
     MODEL_OPTIONS[f"Groq / {display_name}"] = {"provider": "groq", "model": model_id}
 for display_name, model_id in COMET_MODELS.items():
@@ -166,13 +174,6 @@ for display_name, model_id in XAI_MODELS.items():
     MODEL_OPTIONS[f"xAI / {display_name}"] = {"provider": "xai", "model": model_id}
 for display_name, model_id in NVIDIA_NEMOTRON_MODELS.items():
     MODEL_OPTIONS[f"NVIDIA / {display_name}"] = {"provider": "nvidia", "model": model_id}
-MODEL_OPTIONS["\u2728 LS 5.1 (custom)"] = {
-    "provider": "ls_custom",
-    "model": LS_51_MODEL_ID,
-    "base_provider": "cometapi",
-    "system_prompt": LS_51_SYSTEM_PROMPT,
-    "temperature": 0.82,
-}
 
 DEFAULT_MODEL_DISPLAY = "Groq / Llama 3.3 70B"
 DEFAULT_MODEL_CONFIG = MODEL_OPTIONS.get(DEFAULT_MODEL_DISPLAY, next(iter(MODEL_OPTIONS.values())))

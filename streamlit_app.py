@@ -18,6 +18,16 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageDraw
 
+try:
+    import google as google_namespace
+except ImportError:
+    google_namespace = None
+
+try:
+    from googlesearch import search as google_search
+except ImportError:
+    google_search = None
+
 
 def _load_streamlit_secrets_to_env():
     keys = [
@@ -562,7 +572,7 @@ def render_header(route):
             <div class="logo">&#10024;</div>
             <div>
               <div class="brand-title">Lightsky AI pro</div>
-              <div class="brand-subtitle">by Krivi and codex</div>
+              <div class="brand-subtitle">by Krivi</div>
             </div>
           </div>
           <div style="color:#687386;font-weight:650;">{provider_display(route['provider'])} / {model_clean(route['display'])}</div>
@@ -691,16 +701,102 @@ def normalize_url(value):
     return "https://www.google.com/search?q=" + urllib.parse.quote(raw)
 
 
+def browser_google_search(query, limit=6):
+    if google_search is None:
+        package_state = "installed" if google_namespace is not None else "missing"
+        st.session_state.browser_status = (
+            f"Google package is {package_state}, but the `googlesearch.search` helper is unavailable."
+        )
+        return []
+    results = []
+    seen = set()
+    try:
+        try:
+            urls = google_search(
+                query,
+                num=limit,
+                stop=limit,
+                pause=1.0,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) LightskyAI/1.0",
+            )
+        except TypeError:
+            urls = google_search(query, num_results=limit)
+        for href in urls:
+            href = str(href or "").strip()
+            if not href.startswith("http"):
+                continue
+            key = href.lower().split("#", 1)[0]
+            if key in seen:
+                continue
+            seen.add(key)
+            page = core._ls51_fetch_page_summary(href, max_chars=420)
+            parsed = urllib.parse.urlparse(href)
+            title = (page or {}).get("title") or parsed.netloc or href
+            snippet = (page or {}).get("summary") or ""
+            results.append({"title": title, "url": href, "snippet": snippet})
+            if len(results) >= limit:
+                break
+    except Exception as exc:
+        st.session_state.browser_status = f"Google search failed: {exc}"
+    return results
+
+
 def browser_screen(route):
     render_header(route)
     st.markdown("### Browser")
-    target = st.text_input("URL or search", value="https://www.google.com")
-    url = normalize_url(target)
-    c1, c2 = st.columns([1, 1])
+    st.session_state.setdefault("browser_url", "https://www.google.com")
+    st.session_state.setdefault("browser_results", [])
+    st.session_state.setdefault("browser_status", "")
+
+    target = st.text_input("URL or search", value=st.session_state.browser_url, key="browser_input")
+    c1, c2, c3 = st.columns([1, 1, 1])
     with c1:
-        st.link_button("Open in real browser", url)
+        if st.button("Preview / go", type="primary"):
+            st.session_state.browser_url = normalize_url(target)
+            st.session_state.browser_status = ""
     with c2:
-        st.caption("Embedded browsing works only when the site allows iframes.")
+        if st.button("Google search"):
+            st.session_state.browser_status = "Searching with the installed google package..."
+            results = browser_google_search(target, limit=6)
+            st.session_state.browser_results = results
+            if results:
+                st.session_state.browser_url = results[0]["url"]
+                st.session_state.browser_status = f"Found {len(results)} Google results."
+            else:
+                st.session_state.browser_url = normalize_url(target)
+                if not st.session_state.browser_status:
+                    st.session_state.browser_status = "No Google results returned; showing a normal search URL."
+    with c3:
+        if st.button("Google home"):
+            st.session_state.browser_url = "https://www.google.com"
+            st.session_state.browser_results = []
+            st.session_state.browser_status = ""
+
+    if st.session_state.browser_status:
+        st.caption(st.session_state.browser_status)
+
+    if st.session_state.browser_results:
+        labels = [f"{i + 1}. {item['title']}" for i, item in enumerate(st.session_state.browser_results)]
+        pick = st.selectbox("Google results", labels)
+        selected = st.session_state.browser_results[labels.index(pick)]
+        st.markdown(f"**{selected['title']}**  \n{selected['url']}")
+        if selected.get("snippet"):
+            st.caption(selected["snippet"][:500])
+        a, b = st.columns([1, 1])
+        with a:
+            if st.button("Preview selected result"):
+                st.session_state.browser_url = selected["url"]
+                st.rerun()
+        with b:
+            st.link_button("Open selected in real browser", selected["url"])
+    else:
+        st.caption(
+            "Google search uses the installed `google` package when available. "
+            "Embedded browsing works only when the site allows iframes."
+        )
+
+    url = st.session_state.browser_url
+    st.link_button("Open current page in real browser", url)
     render_iframe(url, height=680, scrolling=True)
 
 
@@ -1040,7 +1136,7 @@ def main():
     init_state()
     with st.sidebar:
         st.markdown("## \u2728 Lightsky AI")
-        st.caption("pro by Krivi and codex")
+        st.caption("pro by Krivi")
         model_names = list(core.MODEL_OPTIONS.keys())
         default_index = model_names.index(core.DEFAULT_MODEL_DISPLAY) if core.DEFAULT_MODEL_DISPLAY in model_names else 0
         selected_model = st.selectbox("Model", model_names, index=default_index)
