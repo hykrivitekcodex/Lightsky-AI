@@ -44,3 +44,15 @@ ignored by git.
 
 Do not commit `.streamlit/secrets.toml`, logs, downloads, generated images, or
 local cookies.
+
+## Windows Installer
+
+The NSIS installer is built from `installer/LightskyAIPro.nsi`:
+
+```powershell
+& "C:\Program Files (x86)\NSIS\makensis.exe" installer\LightskyAIPro.nsi
+```
+
+The generated installer is `dist/LightskyAIProSetup.exe`. It installs the app
+per user, creates Start Menu/Desktop shortcuts, and launches Streamlit through
+`LaunchLightskyAI.cmd`.
