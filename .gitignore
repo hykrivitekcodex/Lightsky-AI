@@ -4,6 +4,7 @@ __pycache__/
 .google-cookie
 .streamlit/secrets.toml
 lightsky_accounts.json
+lightsky_sessions.json
 downloads/
 generated_images/
 intertest_runs/

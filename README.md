@@ -38,7 +38,9 @@ For Google sign-in, create a Google OAuth client for a web application and set
 `http://localhost:8501/` or your hosted Streamlit URL.
 
 Email/password sign-in stores local account records in `lightsky_accounts.json`
-using salted PBKDF2 password hashes. That file is ignored by git.
+using salted PBKDF2 password hashes. Browser refresh persistence uses
+device-specific session tokens saved in `lightsky_sessions.json`. Both files are
+ignored by git.
 
 Do not commit `.streamlit/secrets.toml`, logs, downloads, generated images, or
 local cookies.

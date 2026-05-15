@@ -80,6 +80,9 @@ PLUGIN_DIR = APP_DIR / "github_plugins"
 GENERATED_DIR = APP_DIR / "generated_images"
 INTERTEST_DIR = APP_DIR / "intertest_runs"
 ACCOUNT_STORE = APP_DIR / "lightsky_accounts.json"
+SESSION_STORE = APP_DIR / "lightsky_sessions.json"
+SESSION_STORAGE_KEY = "lightsky_ai_session_token"
+SESSION_QUERY_PARAM = "ls_session"
 LABS_URL = "https://lightsky-ai-krivi.streamlit.app/labs"
 LABS_EMAIL = "krivi.ezhil@gmail.com"
 
@@ -636,10 +639,176 @@ def current_user():
     return st.session_state.get("auth_user")
 
 
+def load_session_store():
+    if not SESSION_STORE.exists():
+        return {"sessions": {}}
+    try:
+        data = json.loads(SESSION_STORE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"sessions": {}}
+    if not isinstance(data, dict):
+        return {"sessions": {}}
+    sessions = data.get("sessions")
+    if not isinstance(sessions, dict):
+        data["sessions"] = {}
+    return data
+
+
+def save_session_store(data):
+    SESSION_STORE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def session_token_hash(token):
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def revoke_session_token(token):
+    if not token:
+        return
+    data = load_session_store()
+    sessions = data.setdefault("sessions", {})
+    token_key = session_token_hash(token)
+    if token_key in sessions:
+        sessions.pop(token_key, None)
+        save_session_store(data)
+
+
+def create_persistent_session(user):
+    old_token = st.session_state.get("browser_session_token", "")
+    if old_token:
+        revoke_session_token(old_token)
+    token = secrets.token_urlsafe(32)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    data = load_session_store()
+    data.setdefault("sessions", {})[session_token_hash(token)] = {
+        "provider": user.get("provider", "Email"),
+        "name": user.get("name", ""),
+        "email": normalize_email(user.get("email", "")),
+        "sub": user.get("sub", ""),
+        "created_at": now,
+        "last_seen_at": now,
+    }
+    save_session_store(data)
+    st.session_state.browser_session_token = token
+    st.session_state.pending_session_token = token
+    st.session_state.pending_clear_session = False
+    return token
+
+
+def user_from_session_record(record):
+    email = normalize_email(record.get("email", ""))
+    provider = record.get("provider", "Email")
+    name = record.get("name", "") or (email.split("@")[0] if email else "Lightsky user")
+    if provider == "Email" and email:
+        account = load_account_store().get("accounts", {}).get(email, {})
+        name = account.get("name") or name
+    return {
+        "provider": provider,
+        "name": name,
+        "email": email,
+        "picture": "",
+        "sub": record.get("sub", email),
+        "signed_in_at": record.get("last_seen_at", "saved session"),
+    }
+
+
+def restore_user_from_session_token(token):
+    if not token or len(str(token)) > 256:
+        return False
+    data = load_session_store()
+    token_key = session_token_hash(token)
+    record = data.get("sessions", {}).get(token_key)
+    if not record:
+        return False
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    record["last_seen_at"] = now
+    save_session_store(data)
+    st.session_state.auth_user = user_from_session_record(record)
+    st.session_state.browser_session_token = token
+    st.session_state.auth_error = ""
+    return True
+
+
+def process_browser_session_restore():
+    token = get_query_value(SESSION_QUERY_PARAM)
+    if not token:
+        return
+    restored = restore_user_from_session_token(token)
+    if not restored:
+        st.session_state.pending_clear_session = True
+    clear_auth_query_params()
+    st.rerun()
+
+
+def render_session_storage_bridge():
+    action = ""
+    token = ""
+    if st.session_state.get("pending_session_token"):
+        action = "set"
+        token = st.session_state.pop("pending_session_token", "")
+    elif st.session_state.get("pending_clear_session"):
+        action = "clear"
+        st.session_state.pending_clear_session = False
+    elif (
+        startup_is_done()
+        and not current_user()
+        and not get_query_value(SESSION_QUERY_PARAM)
+        and not get_query_value("code")
+        and not get_query_value("error")
+    ):
+        action = "restore"
+    if not action:
+        return
+
+    payload = json.dumps(
+        {
+            "action": action,
+            "token": token,
+            "key": SESSION_STORAGE_KEY,
+            "param": SESSION_QUERY_PARAM,
+        }
+    )
+    components.html(
+        f"""
+        <script>
+        (() => {{
+          const payload = {payload};
+          try {{
+            const parentWindow = window.parent || window;
+            const storage = parentWindow.localStorage || window.localStorage;
+            if (payload.action === "set" && payload.token) {{
+              storage.setItem(payload.key, payload.token);
+            }}
+            if (payload.action === "clear") {{
+              storage.removeItem(payload.key);
+            }}
+            if (payload.action === "restore") {{
+              const saved = storage.getItem(payload.key);
+              if (saved) {{
+                const url = new URL(parentWindow.location.href);
+                if (!url.searchParams.has(payload.param) && !url.searchParams.has("code")) {{
+                  url.searchParams.set(payload.param, saved);
+                  url.searchParams.set("startup", "done");
+                  parentWindow.location.replace(url.toString());
+                }}
+              }}
+            }}
+          }} catch (error) {{}}
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def sign_out():
+    revoke_session_token(st.session_state.get("browser_session_token", ""))
     st.session_state.auth_user = None
     st.session_state.auth_error = ""
     st.session_state.google_oauth_state = ""
+    st.session_state.browser_session_token = ""
+    st.session_state.pending_clear_session = True
     st.rerun()
 
 
@@ -698,7 +867,7 @@ def sign_in_email_account(email, password):
     account = load_account_store().get("accounts", {}).get(email)
     if not account or not verify_password(password, account):
         return False, "Email or password is wrong."
-    st.session_state.auth_user = {
+    user = {
         "provider": "Email",
         "name": account.get("name") or email.split("@")[0],
         "email": email,
@@ -706,6 +875,8 @@ def sign_in_email_account(email, password):
         "sub": email,
         "signed_in_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
+    st.session_state.auth_user = user
+    create_persistent_session(user)
     st.session_state.auth_error = ""
     return True, ""
 
@@ -730,7 +901,7 @@ def create_email_account(name, email, password, confirm_password):
         "created_at": now,
     }
     save_account_store(data)
-    st.session_state.auth_user = {
+    user = {
         "provider": "Email",
         "name": accounts[email]["name"],
         "email": email,
@@ -738,6 +909,8 @@ def create_email_account(name, email, password, confirm_password):
         "sub": email,
         "signed_in_at": now,
     }
+    st.session_state.auth_user = user
+    create_persistent_session(user)
     st.session_state.auth_error = ""
     return True, ""
 
@@ -807,7 +980,7 @@ def process_google_oauth_callback():
             message = profile.get("error_description") or profile.get("error") or f"HTTP {profile_response.status_code}"
             raise RuntimeError(message)
 
-        st.session_state.auth_user = {
+        user = {
             "provider": "Google",
             "name": profile.get("name") or profile.get("given_name") or profile.get("email") or "Google user",
             "email": profile.get("email", ""),
@@ -815,6 +988,8 @@ def process_google_oauth_callback():
             "sub": profile.get("sub", ""),
             "signed_in_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
+        st.session_state.auth_user = user
+        create_persistent_session(user)
         st.session_state.auth_error = ""
     except Exception as exc:
         st.session_state.auth_error = f"Google sign-in failed: {exc}"
@@ -1179,6 +1354,9 @@ def init_state():
     st.session_state.setdefault("auth_user", None)
     st.session_state.setdefault("auth_error", "")
     st.session_state.setdefault("google_oauth_state", "")
+    st.session_state.setdefault("browser_session_token", "")
+    st.session_state.setdefault("pending_session_token", "")
+    st.session_state.setdefault("pending_clear_session", False)
 
 
 def append_sources(response, sources):
@@ -1832,11 +2010,14 @@ def settings_screen(route):
 
 def main():
     init_state()
+    process_browser_session_restore()
     process_google_oauth_callback()
 
     if not startup_is_done():
         render_startup_screen()
         return
+
+    render_session_storage_bridge()
 
     with st.sidebar:
         st.markdown("## \u2728 Lightsky AI")
