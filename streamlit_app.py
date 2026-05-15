@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import urllib.parse
 import zipfile
 from datetime import datetime
@@ -339,6 +340,82 @@ h1, h2, h3, p, label, span, div {
   box-shadow: inset 0 0 0 1px rgba(124, 58, 237, .24), 0 0 0 0 transparent !important;
   outline: none !important;
 }
+.startup-shell {
+  min-height: calc(100vh - 2.4rem);
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+.startup-shell::before {
+  content: "";
+  position: absolute;
+  inset: 11% 15%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(96,165,250,.18), transparent 58%),
+              radial-gradient(circle at 68% 36%, rgba(244,114,182,.16), transparent 42%);
+  filter: blur(12px);
+}
+.startup-mark {
+  width: min(520px, 88vw);
+  min-height: 390px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  position: relative;
+  isolation: isolate;
+}
+.startup-logo {
+  width: 104px;
+  height: 104px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 22px;
+  border-radius: 34px;
+  background: var(--siri-gradient);
+  background-size: 320% 320%;
+  animation: siriFlow 6s ease-in-out infinite;
+  box-shadow: 0 26px 80px rgba(96,165,250,.24), inset 0 0 0 1px rgba(255,255,255,.55);
+  font-size: 52px;
+}
+.startup-title {
+  font-size: clamp(2.6rem, 8vw, 5.8rem);
+  font-weight: 820;
+  line-height: .94;
+  letter-spacing: 0;
+  color: #111827;
+  margin: 0;
+}
+.startup-byline {
+  margin-top: 14px;
+  color: #667085;
+  font-size: 1rem;
+  font-weight: 700;
+}
+.startup-ribbon {
+  width: min(330px, 72vw);
+  height: 5px;
+  border-radius: 999px;
+  margin: 30px auto 0;
+  background: var(--siri-gradient);
+  background-size: 320% 320%;
+  animation: siriFlow 3.8s ease-in-out infinite, siriPulse 2.6s ease-in-out infinite;
+  box-shadow: 0 0 28px rgba(124,58,237,.22);
+}
+.startup-enter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 26px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: linear-gradient(#fff, #fff) padding-box, var(--siri-gradient) border-box;
+  color: #172033 !important;
+  text-decoration: none !important;
+  font-weight: 760;
+  box-shadow: 0 12px 32px rgba(17, 24, 39, .08);
+}
 .source-item {
   color: var(--muted);
   font-size: .9rem;
@@ -363,6 +440,54 @@ h1, h2, h3, p, label, span, div {
 
 
 st.markdown(CSS, unsafe_allow_html=True)
+
+
+def startup_is_done():
+    try:
+        return st.query_params.get("startup") == "done"
+    except Exception:
+        try:
+            return st.experimental_get_query_params().get("startup", [""])[0] == "done"
+        except Exception:
+            return False
+
+
+def render_startup_screen():
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"], [data-testid="stToolbar"], [data-testid="stHeader"] {
+          display: none !important;
+        }
+        .main .block-container {
+          max-width: 100% !important;
+          padding-top: 0 !important;
+          padding-bottom: 0 !important;
+        }
+        </style>
+        <div class="startup-shell">
+          <div class="startup-mark">
+            <div>
+              <div class="startup-logo">&#10024;</div>
+              <h1 class="startup-title">Lightsky AI</h1>
+              <div class="startup-byline">by Krivi</div>
+              <div class="startup-ribbon"></div>
+              <a class="startup-enter" href="?startup=done" target="_self">Enter</a>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    time.sleep(2.2)
+    try:
+        st.query_params["startup"] = "done"
+    except Exception:
+        try:
+            st.experimental_set_query_params(startup="done")
+        except Exception:
+            pass
+    st.rerun()
 
 
 def render_iframe(url, height=680, scrolling=True):
@@ -1254,6 +1379,10 @@ def settings_screen(route):
 
 
 def main():
+    if not startup_is_done():
+        render_startup_screen()
+        return
+
     init_state()
     with st.sidebar:
         st.markdown("## \u2728 Lightsky AI")
