@@ -7,15 +7,17 @@ Unicode true
 !define APP_REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\LightskyAIPro"
 !define SRC_DIR ".."
 !define DIST_DIR "..\dist"
+!define LAUNCHER_EXE "${DIST_DIR}\LightskyAIProLauncher.exe"
 
 Name "${APP_NAME}"
 OutFile "${DIST_DIR}\LightskyAIProSetup.exe"
-InstallDir "$LOCALAPPDATA\Lightsky AI pro by Krivi"
-RequestExecutionLevel user
+InstallDir "$PROGRAMFILES64\Lightsky AI pro by Krivi"
+RequestExecutionLevel admin
 ShowInstDetails show
 ShowUninstDetails show
 
 !include "MUI2.nsh"
+!include "x64.nsh"
 
 !define MUI_ABORTWARNING
 !define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
@@ -24,7 +26,7 @@ ShowUninstDetails show
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\LaunchLightskyAI.cmd"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\LightskyAIPro.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Launch Lightsky AI pro"
 !insertmacro MUI_PAGE_FINISH
 
@@ -34,15 +36,20 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Lightsky AI pro" SecMain
-  SetShellVarContext current
+  SetShellVarContext all
+  ${IfNot} ${RunningX64}
+    StrCpy $INSTDIR "$PROGRAMFILES\Lightsky AI pro by Krivi"
+  ${EndIf}
   SetOutPath "$INSTDIR"
   SetOverwrite ifnewer
 
   File "${SRC_DIR}\streamlit_app.py"
   File "${SRC_DIR}\lightsky_core.py"
+  File "${SRC_DIR}\desktop_launcher.py"
   File "${SRC_DIR}\requirements.txt"
   File "${SRC_DIR}\README.md"
   File "${SRC_DIR}\LICENSE"
+  File "/oname=LightskyAIPro.exe" "${LAUNCHER_EXE}"
   File "${SRC_DIR}\installer\LaunchLightskyAI.cmd"
   File "${SRC_DIR}\installer\README_INSTALL.txt"
 
@@ -51,28 +58,28 @@ Section "Lightsky AI pro" SecMain
 
   SetOutPath "$INSTDIR"
   CreateDirectory "$SMPROGRAMS\${APP_SHORT}"
-  CreateShortcut "$SMPROGRAMS\${APP_SHORT}\${APP_SHORT}.lnk" "$INSTDIR\LaunchLightskyAI.cmd" "" "$INSTDIR\LaunchLightskyAI.cmd" 0
+  CreateShortcut "$SMPROGRAMS\${APP_SHORT}\${APP_SHORT}.lnk" "$INSTDIR\LightskyAIPro.exe" "" "$INSTDIR\LightskyAIPro.exe" 0
   CreateShortcut "$SMPROGRAMS\${APP_SHORT}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$DESKTOP\${APP_SHORT}.lnk" "$INSTDIR\LaunchLightskyAI.cmd" "" "$INSTDIR\LaunchLightskyAI.cmd" 0
+  CreateShortcut "$DESKTOP\${APP_SHORT}.lnk" "$INSTDIR\LightskyAIPro.exe" "" "$INSTDIR\LightskyAIPro.exe" 0
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKCU "${APP_REGKEY}" "DisplayName" "${APP_NAME}"
-  WriteRegStr HKCU "${APP_REGKEY}" "DisplayVersion" "${APP_VERSION}"
-  WriteRegStr HKCU "${APP_REGKEY}" "Publisher" "${APP_PUBLISHER}"
-  WriteRegStr HKCU "${APP_REGKEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${APP_REGKEY}" "UninstallString" "$INSTDIR\Uninstall.exe"
-  WriteRegDWORD HKCU "${APP_REGKEY}" "NoModify" 1
-  WriteRegDWORD HKCU "${APP_REGKEY}" "NoRepair" 1
+  WriteRegStr HKLM "${APP_REGKEY}" "DisplayName" "${APP_NAME}"
+  WriteRegStr HKLM "${APP_REGKEY}" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr HKLM "${APP_REGKEY}" "Publisher" "${APP_PUBLISHER}"
+  WriteRegStr HKLM "${APP_REGKEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKLM "${APP_REGKEY}" "UninstallString" "$INSTDIR\Uninstall.exe"
+  WriteRegDWORD HKLM "${APP_REGKEY}" "NoModify" 1
+  WriteRegDWORD HKLM "${APP_REGKEY}" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
-  SetShellVarContext current
+  SetShellVarContext all
 
   Delete "$DESKTOP\${APP_SHORT}.lnk"
   Delete "$SMPROGRAMS\${APP_SHORT}\${APP_SHORT}.lnk"
   Delete "$SMPROGRAMS\${APP_SHORT}\Uninstall.lnk"
   RMDir "$SMPROGRAMS\${APP_SHORT}"
 
-  DeleteRegKey HKCU "${APP_REGKEY}"
+  DeleteRegKey HKLM "${APP_REGKEY}"
   RMDir /r "$INSTDIR"
 SectionEnd

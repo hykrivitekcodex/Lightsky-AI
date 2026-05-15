@@ -42,7 +42,6 @@ if not exist ".venv\.lightsky_deps_installed" (
   echo installed > ".venv\.lightsky_deps_installed"
 )
 
-start "" "http://127.0.0.1:8501/?startup=done"
-python -m streamlit run streamlit_app.py --server.headless false --server.port 8501
+python desktop_launcher.py
 
 pause

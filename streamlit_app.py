@@ -75,16 +75,22 @@ import lightsky_core as core
 
 
 APP_DIR = Path(__file__).resolve().parent
-DOWNLOAD_DIR = APP_DIR / "downloads"
-PLUGIN_DIR = APP_DIR / "github_plugins"
-GENERATED_DIR = APP_DIR / "generated_images"
-INTERTEST_DIR = APP_DIR / "intertest_runs"
-ACCOUNT_STORE = APP_DIR / "lightsky_accounts.json"
-SESSION_STORE = APP_DIR / "lightsky_sessions.json"
+USER_DATA_DIR = Path(os.environ.get("LIGHTSKY_USER_DATA_DIR", APP_DIR)).resolve()
+DOWNLOAD_DIR = USER_DATA_DIR / "downloads"
+PLUGIN_DIR = USER_DATA_DIR / "github_plugins"
+GENERATED_DIR = USER_DATA_DIR / "generated_images"
+INTERTEST_DIR = USER_DATA_DIR / "intertest_runs"
+ACCOUNT_STORE = USER_DATA_DIR / "lightsky_accounts.json"
+SESSION_STORE = USER_DATA_DIR / "lightsky_sessions.json"
 SESSION_STORAGE_KEY = "lightsky_ai_session_token"
 SESSION_QUERY_PARAM = "ls_session"
 LABS_URL = "https://lightsky-ai-krivi.streamlit.app/labs"
 LABS_EMAIL = "krivi.ezhil@gmail.com"
+DESKTOP_RELEASE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/tag/v3.0"
+DESKTOP_APP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/download/v3.0/LightskyAIPro.exe"
+DESKTOP_SETUP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/download/v3.0/LightskyAIProSetup.exe"
+DESKTOP_SETUP_SHA256 = "9BE6BE2FBB481C6FDCEBD2E0278ABC3D2C87536815187BBA0FC0EABCC80CCFD5"
+DESKTOP_APP_SHA256 = "7E8BF69176EE145EB7C186D84D992B046CF929940CBA965A25F57A39A2FC4BD7"
 
 for folder in (DOWNLOAD_DIR, PLUGIN_DIR, GENERATED_DIR, INTERTEST_DIR):
     folder.mkdir(exist_ok=True)
@@ -120,6 +126,16 @@ CSS = """
               var(--bg);
   color: var(--text);
 }
+[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+#MainMenu {
+  display: none !important;
+}
+.stApp > header {
+  display: none !important;
+}
 [data-testid="stSidebar"] {
   position: relative;
   background: linear-gradient(180deg, #eef2f8 0%, #f8fafc 100%);
@@ -143,7 +159,7 @@ CSS = """
 }
 .main .block-container {
   max-width: 1320px;
-  padding-top: 1.2rem;
+  padding-top: 1rem;
   padding-bottom: 4rem;
 }
 h1, h2, h3, p, label, span, div {
@@ -1399,6 +1415,37 @@ def chat_screen(route):
         st.rerun()
 
 
+def render_desktop_download_panel(compact=False):
+    if compact:
+        st.link_button("Download desktop app", DESKTOP_APP_EXE_URL, use_container_width=True)
+        st.caption("Windows EXE from the official v3.0 GitHub release.")
+        return
+
+    st.markdown(
+        f"""
+        <div class="soft-card">
+          <div class="account-name">Download Lightsky AI for Windows</div>
+          <div class="account-email">Get the desktop app from the official v3.0 release.</div>
+          <div class="account-provider">{escape_text(DESKTOP_RELEASE_URL.replace('https://', ''))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.link_button("Download desktop app", DESKTOP_APP_EXE_URL, use_container_width=True)
+    with col2:
+        st.link_button("Download setup", DESKTOP_SETUP_EXE_URL, use_container_width=True)
+    with col3:
+        st.link_button("Open release page", DESKTOP_RELEASE_URL, use_container_width=True)
+    with st.expander("Verify downloads"):
+        st.code(
+            f"LightskyAIPro.exe SHA256\n{DESKTOP_APP_SHA256}\n\n"
+            f"LightskyAIProSetup.exe SHA256\n{DESKTOP_SETUP_SHA256}",
+            language="text",
+        )
+
+
 def render_account_sidebar():
     user = current_user()
     if user:
@@ -1428,6 +1475,8 @@ def render_account_sidebar():
             st.markdown(google_signin_link(), unsafe_allow_html=True)
         else:
             st.caption("Google sign-in needs OAuth secrets.")
+    st.markdown("---")
+    render_desktop_download_panel(compact=True)
 
 
 def account_screen(route):
@@ -1990,6 +2039,7 @@ Input:
 def settings_screen(route):
     render_header(route)
     st.markdown("### Settings")
+    render_desktop_download_panel()
     st.write("Launch the Streamlit app locally with:")
     st.code("py -m streamlit run streamlit_app.py", language="powershell")
     st.markdown("#### Providers")
