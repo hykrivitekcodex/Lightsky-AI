@@ -97,6 +97,7 @@ CSS = """
   --pink: #db2777;
   --green: #16a34a;
   --gold: #ca8a04;
+  --siri-gradient: linear-gradient(100deg, #67e8f9, #60a5fa, #a78bfa, #f472b6, #fb7185, #facc15, #4ade80, #67e8f9);
 }
 .stApp {
   background: radial-gradient(circle at 30% -10%, rgba(37,99,235,.10), transparent 34%),
@@ -105,8 +106,22 @@ CSS = """
   color: var(--text);
 }
 [data-testid="stSidebar"] {
+  position: relative;
   background: linear-gradient(180deg, #eef2f8 0%, #f8fafc 100%);
   border-right: 1px solid var(--line);
+}
+[data-testid="stSidebar"]::after {
+  content: "";
+  position: absolute;
+  top: 18px;
+  right: 0;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--siri-gradient);
+  background-size: 320% 320%;
+  animation: siriFlow 8s ease-in-out infinite;
+  opacity: .8;
 }
 [data-testid="stSidebar"] * {
   font-family: "Segoe UI", system-ui, sans-serif;
@@ -120,6 +135,8 @@ h1, h2, h3, p, label, span, div {
   font-family: "Segoe UI", system-ui, sans-serif;
 }
 .hero {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -131,19 +148,35 @@ h1, h2, h3, p, label, span, div {
   box-shadow: 0 18px 46px rgba(17, 24, 39, .07);
   backdrop-filter: blur(14px);
 }
+.hero::after {
+  content: "";
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--siri-gradient);
+  background-size: 320% 320%;
+  animation: siriFlow 9s ease-in-out infinite;
+  opacity: .54;
+}
 .brand {
   display: flex;
   align-items: center;
   gap: 14px;
 }
 .logo {
+  position: relative;
   width: 48px;
   height: 48px;
   border-radius: 18px;
   display: grid;
   place-items: center;
   color: #111827;
-  background: linear-gradient(135deg, #ecfeff, #fdf2f8 45%, #eef2ff);
+  background: var(--siri-gradient);
+  background-size: 320% 320%;
+  animation: siriFlow 9s ease-in-out infinite;
   box-shadow: inset 0 0 0 1px #dbe3ef, 0 10px 24px rgba(37,99,235,.13);
   font-size: 25px;
 }
@@ -165,6 +198,8 @@ h1, h2, h3, p, label, span, div {
   margin: 14px 0 18px;
 }
 .status-card, .soft-card {
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 22px;
   background: rgba(255,255,255,.88);
@@ -172,6 +207,19 @@ h1, h2, h3, p, label, span, div {
 }
 .status-card {
   padding: 12px 14px;
+}
+.status-card::before, .soft-card::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--siri-gradient);
+  background-size: 320% 320%;
+  animation: siriFlow 10s ease-in-out infinite;
+  opacity: .58;
 }
 .status-label {
   color: var(--muted);
@@ -208,21 +256,54 @@ h1, h2, h3, p, label, span, div {
 }
 .stButton > button, .stDownloadButton > button {
   border-radius: 999px !important;
-  border: 1px solid #d8e0ec !important;
-  background: #ffffff !important;
+  border: 1px solid transparent !important;
+  background: linear-gradient(#ffffff, #ffffff) padding-box, var(--siri-gradient) border-box !important;
+  background-size: auto, 320% 320% !important;
   color: #172033 !important;
   font-weight: 700 !important;
   box-shadow: 0 8px 22px rgba(17, 24, 39, .055);
 }
 .stButton > button:hover, .stDownloadButton > button:hover {
-  border-color: #b9c7dc !important;
-  background: #f8fbff !important;
+  background: linear-gradient(#f8fbff, #f8fbff) padding-box, var(--siri-gradient) border-box !important;
+  animation: siriFlow 6s ease-in-out infinite;
+}
+[data-testid="stSelectbox"] > div > div,
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+  border-radius: 18px !important;
+  border: 1px solid transparent !important;
+  background: linear-gradient(#ffffff, #ffffff) padding-box, var(--siri-gradient) border-box !important;
+  background-size: auto, 320% 320% !important;
+  box-shadow: 0 8px 22px rgba(17, 24, 39, .045) !important;
+}
+[data-testid="stSelectbox"] > div > div:focus-within,
+[data-testid="stTextInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+  animation: siriFlow 7s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(96,165,250,.12), 0 10px 28px rgba(17, 24, 39, .06) !important;
+}
+[data-testid="stChatMessage"] {
+  position: relative;
+  border-radius: 22px;
+}
+[data-testid="stChatMessage"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--siri-gradient);
+  background-size: 260% 260%;
+  animation: siriFlow 10s ease-in-out infinite;
+  opacity: .34;
 }
 [data-testid="stChatInput"] {
   position: relative;
   border-radius: 34px !important;
   padding: 2px !important;
-  background: linear-gradient(100deg, #67e8f9, #60a5fa, #a78bfa, #f472b6, #fb7185, #facc15, #4ade80, #67e8f9);
+  background: var(--siri-gradient);
   background-size: 320% 320%;
   animation: siriFlow 7s ease-in-out infinite;
   box-shadow: 0 18px 52px rgba(17, 24, 39, .10), 0 0 24px rgba(124, 58, 237, .14);
