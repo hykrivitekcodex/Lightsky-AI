@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.log
+.google-cookie
+.streamlit/secrets.toml
+downloads/
+generated_images/
+intertest_runs/
+*.db

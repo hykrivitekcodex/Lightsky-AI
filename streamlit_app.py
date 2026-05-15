@@ -2,6 +2,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,21 +18,56 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, ImageDraw
 
-import LightSky_AI as core
+
+def _load_streamlit_secrets_to_env():
+    keys = [
+        "GROQ_API_KEY",
+        "GROQ_API_KEYS",
+        "COMETAPI_API_KEY",
+        "HF_TOKEN",
+        "HUGGINGFACE_TOKEN",
+        "XAI_API_KEY",
+        "XAI_API_TOKEN",
+        "NVIDIA_API_KEY",
+        "NVIDIA_NIM_API_KEY",
+        "NVIDIA_NGC_API_KEY",
+    ]
+    try:
+        secrets = st.secrets
+    except Exception:
+        return
+    for key in keys:
+        try:
+            value = secrets.get(key)
+        except Exception:
+            value = None
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            value = ",".join(str(item) for item in value if item)
+        value = str(value).strip()
+        if value and not os.environ.get(key):
+            os.environ[key] = value
+
+
+_load_streamlit_secrets_to_env()
+
+import lightsky_core as core
 
 
 APP_DIR = Path(__file__).resolve().parent
 DOWNLOAD_DIR = APP_DIR / "downloads"
 PLUGIN_DIR = APP_DIR / "github_plugins"
 GENERATED_DIR = APP_DIR / "generated_images"
+INTERTEST_DIR = APP_DIR / "intertest_runs"
 
-for folder in (DOWNLOAD_DIR, PLUGIN_DIR, GENERATED_DIR):
+for folder in (DOWNLOAD_DIR, PLUGIN_DIR, GENERATED_DIR, INTERTEST_DIR):
     folder.mkdir(exist_ok=True)
 
 
 st.set_page_config(
     page_title="Lightsky AI pro by krivi",
-    page_icon="✨",
+    page_icon="\u2728",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -198,6 +234,13 @@ h1, h2, h3, p, label, span, div {
 st.markdown(CSS, unsafe_allow_html=True)
 
 
+def render_iframe(url, height=680, scrolling=True):
+    if hasattr(st, "iframe"):
+        st.iframe(url, height=height, scrolling=scrolling)
+    else:
+        components.iframe(url, height=height, scrolling=scrolling)
+
+
 def provider_display(provider):
     return core.provider_display_name(provider)
 
@@ -245,14 +288,266 @@ def call_selected_model(prompt, route, max_tokens=700, web=True):
     return response, sources
 
 
+def _python_command():
+    return "py" if shutil.which("py") else sys.executable
+
+
+def _normalize_args(value):
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item).strip()]
+    try:
+        return shlex.split(str(value))
+    except Exception:
+        return [str(value)]
+
+
+def _safe_intertest_cwd(value=None):
+    if not value:
+        return APP_DIR
+    try:
+        candidate = Path(str(value)).expanduser().resolve()
+        candidate.relative_to(APP_DIR)
+        return candidate
+    except Exception:
+        return APP_DIR
+
+
+def _blocked_intertest_command(command):
+    lowered = (command or "").lower()
+    blocked = [
+        r"\bremove-item\b.*\b-recurse\b",
+        r"\brm\s+-rf\b",
+        r"\brmdir\s+/s\b",
+        r"\bdel\s+/s\b",
+        r"\bformat\b",
+        r"\bshutdown\b",
+        r"\brestart-computer\b",
+        r"\bset-executionpolicy\b",
+        r"\breg\s+(delete|add)\b",
+        r"\binvoke-expression\b",
+        r"\biex\b",
+        r"\|\s*(sh|bash|powershell|pwsh|iex)\b",
+    ]
+    for pattern in blocked:
+        if re.search(pattern, lowered):
+            return f"Blocked risky command pattern: {pattern}"
+    return ""
+
+
+def _run_process(cmd, cwd=None, timeout=60):
+    started = datetime.now().isoformat(timespec="seconds")
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(_safe_intertest_cwd(cwd)),
+            text=True,
+            capture_output=True,
+            timeout=max(1, min(int(timeout or 60), 180)),
+        )
+        return {
+            "ok": result.returncode == 0,
+            "exit_code": result.returncode,
+            "cmd": cmd,
+            "cwd": str(_safe_intertest_cwd(cwd)),
+            "stdout": result.stdout or "",
+            "stderr": result.stderr or "",
+            "started": started,
+            "finished": datetime.now().isoformat(timespec="seconds"),
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "ok": False,
+            "exit_code": "timeout",
+            "cmd": cmd,
+            "cwd": str(_safe_intertest_cwd(cwd)),
+            "stdout": exc.stdout or "",
+            "stderr": exc.stderr or f"Timed out after {timeout} seconds.",
+            "started": started,
+            "finished": datetime.now().isoformat(timespec="seconds"),
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "exit_code": "error",
+            "cmd": cmd,
+            "cwd": str(_safe_intertest_cwd(cwd)),
+            "stdout": "",
+            "stderr": str(exc),
+            "started": started,
+            "finished": datetime.now().isoformat(timespec="seconds"),
+        }
+
+
+def run_python_code_intertest(code, filename=None, args=None, timeout=60):
+    if not (code or "").strip():
+        return {"ok": False, "exit_code": "error", "stdout": "", "stderr": "No Python code was provided."}
+    run_dir = INTERTEST_DIR / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", filename or "ai_intertest.py")
+    if not safe_name.endswith(".py"):
+        safe_name += ".py"
+    script_path = run_dir / safe_name
+    script_path.write_text(code, encoding="utf-8")
+    cmd = [_python_command(), str(script_path)] + _normalize_args(args)
+    result = _run_process(cmd, cwd=run_dir, timeout=timeout)
+    result["script_path"] = str(script_path)
+    result["action"] = "python_code"
+    return result
+
+
+def run_python_file_intertest(path, args=None, cwd=None, timeout=120):
+    if not path:
+        return {"ok": False, "exit_code": "error", "stdout": "", "stderr": "No Python file path was provided."}
+    target = Path(str(path)).expanduser()
+    if not target.is_absolute():
+        target = _safe_intertest_cwd(cwd) / target
+    cmd = [_python_command(), str(target)] + _normalize_args(args)
+    result = _run_process(cmd, cwd=cwd, timeout=timeout)
+    result["action"] = "python_file"
+    return result
+
+
+def run_command_intertest(command, cwd=None, timeout=60):
+    if not (command or "").strip():
+        return {"ok": False, "exit_code": "error", "stdout": "", "stderr": "No command was provided."}
+    blocked = _blocked_intertest_command(command)
+    if blocked:
+        return {"ok": False, "exit_code": "blocked", "cmd": command, "stdout": "", "stderr": blocked, "action": "command"}
+    if os.name == "nt":
+        cmd = ["powershell", "-NoProfile", "-Command", command]
+    else:
+        cmd = ["bash", "-lc", command]
+    result = _run_process(cmd, cwd=cwd, timeout=timeout)
+    result["action"] = "command"
+    return result
+
+
+def run_intertest_tool_call(tool_call):
+    action = str(tool_call.get("action") or tool_call.get("tool") or "").strip().lower()
+    timeout = tool_call.get("timeout", 60)
+    if action in {"python_code", "run_python_code", "intertest", "code"}:
+        return run_python_code_intertest(
+            tool_call.get("code") or tool_call.get("script") or "",
+            filename=tool_call.get("filename"),
+            args=tool_call.get("args"),
+            timeout=timeout,
+        )
+    if action in {"python", "python_file", "run_python"}:
+        return run_python_file_intertest(
+            tool_call.get("path"),
+            args=tool_call.get("args"),
+            cwd=tool_call.get("cwd"),
+            timeout=timeout,
+        )
+    if action in {"command", "powershell", "shell"}:
+        return run_command_intertest(tool_call.get("command"), cwd=tool_call.get("cwd"), timeout=timeout)
+    return {
+        "ok": False,
+        "exit_code": "unsupported",
+        "stdout": "",
+        "stderr": f"Unsupported Inter-Test action: {action or 'missing'}",
+        "action": action or "missing",
+    }
+
+
+def extract_intertest_tool_call(text):
+    if not text:
+        return None
+    patterns = [
+        r"```ls_tool_call\s*(.*?)```",
+        r"```json\s*(\{.*?\"action\".*?\})\s*```",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.I | re.S):
+            body = match.group(1).strip()
+            try:
+                data = json.loads(body)
+                if isinstance(data, dict) and (data.get("action") or data.get("tool")):
+                    return data
+            except Exception:
+                continue
+    return None
+
+
+def strip_intertest_tool_blocks(text):
+    text = re.sub(r"```ls_tool_call\s*.*?```", "", text or "", flags=re.I | re.S).strip()
+    return text or "The selected model requested an Inter-Test run."
+
+
+def format_intertest_result(result, max_chars=5000):
+    stdout = (result.get("stdout") or "").strip()
+    stderr = (result.get("stderr") or "").strip()
+    output = []
+    output.append(f"Action: {result.get('action', 'intertest')}")
+    output.append(f"Exit code: {result.get('exit_code')}")
+    if result.get("script_path"):
+        output.append(f"Script: {result.get('script_path')}")
+    if result.get("cmd"):
+        cmd = result.get("cmd")
+        if isinstance(cmd, (list, tuple)):
+            output.append("Command: " + " ".join(str(part) for part in cmd))
+        else:
+            output.append("Command: " + str(cmd))
+    if stdout:
+        output.append("\nSTDOUT:\n" + stdout[:max_chars])
+    if stderr:
+        output.append("\nSTDERR:\n" + stderr[:max_chars])
+    if not stdout and not stderr:
+        output.append("\nNo output.")
+    return "\n".join(output)
+
+
+def run_model_with_intertest(prompt, route, max_tokens=900, web=True):
+    response, sources = call_selected_model(prompt, route, max_tokens=max_tokens, web=web)
+    tool_call = extract_intertest_tool_call(response)
+    if not tool_call:
+        return response, sources, None
+
+    if not st.session_state.get("ai_intertest_enabled", True):
+        notice = (
+            strip_intertest_tool_blocks(response)
+            + "\n\nInter-Test request detected, but AI Inter-Test access is turned off in the sidebar."
+        )
+        return notice, sources, None
+
+    tool_result = run_intertest_tool_call(tool_call)
+    st.session_state.intertest_runs.append(
+        {
+            "model": route.get("display"),
+            "tool_call": tool_call,
+            "result": tool_result,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    followup = f"""
+The selected model requested an Inter-Test run. Here is the original request, your draft, and the actual tool output.
+
+Original user request:
+{prompt}
+
+Model draft:
+{strip_intertest_tool_blocks(response)}
+
+Inter-Test result:
+{format_intertest_result(tool_result)}
+
+Now give the final answer. Use the test result directly. Do not request another tool call.
+"""
+    final_response, _ = call_selected_model(followup.strip(), route, max_tokens=max_tokens, web=False)
+    return final_response or strip_intertest_tool_blocks(response), sources, tool_result
+
+
 def status_cards(route):
+    tool_status = "Inter-Test on" if st.session_state.get("ai_intertest_enabled", True) else "Inter-Test off"
     st.markdown(
         f"""
         <div class="status-grid">
           <div class="status-card"><div class="status-label">Model</div><div class="status-value">{model_clean(route['display'])}</div></div>
           <div class="status-card"><div class="status-label">Provider</div><div class="status-value">{provider_display(route['provider'])}</div></div>
           <div class="status-card"><div class="status-label">Web</div><div class="status-value">available to all models</div></div>
-          <div class="status-card"><div class="status-label">Tools</div><div class="status-value">agent mode enabled</div></div>
+          <div class="status-card"><div class="status-label">Tools</div><div class="status-value">{tool_status}</div></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -264,7 +559,7 @@ def render_header(route):
         f"""
         <div class="hero">
           <div class="brand">
-            <div class="logo">✨</div>
+            <div class="logo">&#10024;</div>
             <div>
               <div class="brand-title">Lightsky AI pro</div>
               <div class="brand-subtitle">by Krivi and codex</div>
@@ -293,6 +588,8 @@ def init_state():
     st.session_state.setdefault("look_details", "")
     st.session_state.setdefault("github_results", [])
     st.session_state.setdefault("last_download", None)
+    st.session_state.setdefault("intertest_runs", [])
+    st.session_state.setdefault("ai_intertest_enabled", True)
 
 
 def append_sources(response, sources):
@@ -315,18 +612,22 @@ def chat_screen(route):
                 with st.expander("Sources"):
                     for src in item["sources"]:
                         st.markdown(f"<div class='source-item'><b>{src.get('title','Source')}</b><br>{src.get('url','')}</div>", unsafe_allow_html=True)
+            if item.get("intertest"):
+                with st.expander("Inter-Test run"):
+                    st.code(format_intertest_result(item["intertest"]), language="text")
 
     prompt = st.chat_input("Ask for follow-up changes")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt, "source": "You", "sources": []})
-        with st.spinner(f"✨ {provider_display(route['provider'])} / {model_clean(route['display'])} is thinking..."):
-            response, sources = call_selected_model(prompt, route, max_tokens=760, web=True)
+        with st.spinner(f"\u2728 {provider_display(route['provider'])} / {model_clean(route['display'])} is thinking..."):
+            response, sources, intertest_result = run_model_with_intertest(prompt, route, max_tokens=900, web=True)
             response = append_sources(response or "The selected model did not return a response.", sources)
         st.session_state.messages.append({
             "role": "assistant",
             "content": response,
             "source": f"{provider_display(route['provider'])} / {model_clean(route['display'])}",
             "sources": sources,
+            "intertest": intertest_result,
         })
         st.rerun()
 
@@ -349,7 +650,7 @@ def arena_screen(route):
     if st.button("Start arena", type="primary"):
         st.session_state.arena_log = []
         shared_context = []
-        with st.spinner("✨ Arena running..."):
+        with st.spinner("\u2728 Arena running..."):
             for round_index in range(1, rounds + 1):
                 for agent in agents:
                     prior = "\n".join(shared_context[-10:])
@@ -400,7 +701,7 @@ def browser_screen(route):
         st.link_button("Open in real browser", url)
     with c2:
         st.caption("Embedded browsing works only when the site allows iframes.")
-    components.iframe(url, height=680, scrolling=True)
+    render_iframe(url, height=680, scrolling=True)
 
 
 FILE_EXTENSIONS = (".exe", ".msi", ".zip", ".pdf", ".whl", ".msix", ".apk", ".dmg", ".pkg", ".tar.gz", ".7z", ".rar")
@@ -507,7 +808,7 @@ def image_screen(route):
         if not prompt.strip():
             st.warning("Enter an image prompt first.")
         else:
-            with st.spinner("✨ Generating image..."):
+            with st.spinner("\u2728 Generating image..."):
                 image = core.generate_huggingface_image(prompt, model=core.HUGGINGFACE_IMAGE_MODELS[model_name], width=size, height=size)
                 if image is None:
                     image = fallback_image(prompt, size, size)
@@ -606,6 +907,40 @@ def plugins_screen(route):
 def intertest_screen(route):
     render_header(route)
     st.markdown("### Inter-Test")
+    st.caption(
+        "Every provider can request `python_code`, `python_file`, or guarded `command` runs. "
+        f"AI Inter-Test access is {'on' if st.session_state.get('ai_intertest_enabled', True) else 'off'} in the sidebar."
+    )
+
+    st.markdown("#### Ask the selected model to build and test code")
+    ai_task = st.text_area(
+        "AI Inter-Test request",
+        placeholder="Example: Write a Python function that validates email addresses, run a few tests, and show the final code.",
+        height=110,
+    )
+    if st.button("Ask model and run Inter-Test", type="primary"):
+        if not ai_task.strip():
+            st.warning("Enter what you want the model to build or test.")
+        else:
+            tool_prompt = f"""
+Use Inter-Test if running code would help. If you need execution, return exactly one `ls_tool_call` block first.
+Then, after the tool output is returned, produce final tested code and the result.
+
+Request:
+{ai_task}
+"""
+            with st.spinner(f"\u2728 {provider_display(route['provider'])} is using Inter-Test..."):
+                response, sources, tool_result = run_model_with_intertest(tool_prompt.strip(), route, max_tokens=1100, web=False)
+            st.markdown(response)
+            if sources:
+                with st.expander("Sources"):
+                    for src in sources:
+                        st.write(src)
+            if tool_result:
+                with st.expander("Inter-Test output", expanded=True):
+                    st.code(format_intertest_result(tool_result), language="text")
+
+    st.markdown("#### Manual runner")
     cwd = st.text_input("Working directory", value=str(APP_DIR))
     file_path = st.text_input("Python file to run with py")
     args = st.text_input("Args", value="")
@@ -614,15 +949,24 @@ def intertest_screen(route):
         if not file_path:
             st.warning("Enter a Python file path.")
         else:
-            cmd = ["py", file_path] + ([args] if args else [])
-            result = subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, timeout=120)
-            st.code((result.stdout or "") + (result.stderr or ""), language="text")
+            result = run_python_file_intertest(file_path, args=args, cwd=cwd, timeout=120)
+            st.code(format_intertest_result(result), language="text")
     if st.button("Run command"):
         if not command.strip():
             st.warning("Enter a command.")
         else:
-            result = subprocess.run(["powershell", "-NoProfile", "-Command", command], cwd=cwd, text=True, capture_output=True, timeout=120)
-            st.code((result.stdout or "") + (result.stderr or ""), language="text")
+            result = run_command_intertest(command, cwd=cwd, timeout=120)
+            st.code(format_intertest_result(result), language="text")
+
+    st.markdown("#### Recent AI Inter-Test runs")
+    if st.session_state.intertest_runs:
+        for item in reversed(st.session_state.intertest_runs[-6:]):
+            title = f"{item.get('created_at', '')} - {item.get('model', 'model')}"
+            with st.expander(title):
+                st.json(item.get("tool_call", {}))
+                st.code(format_intertest_result(item.get("result", {})), language="text")
+    else:
+        st.info("No AI Inter-Test runs yet.")
 
 
 SECURITY_PATTERNS = [
@@ -666,7 +1010,7 @@ Use OWASP 2026 categories and produce:
 Input:
 {code}
 """
-            with st.spinner("✨ Running selected model quick-fix..."):
+            with st.spinner("\u2728 Running selected model quick-fix..."):
                 response, sources = call_selected_model(prompt.strip(), route, max_tokens=1100, web=False)
             st.markdown(response)
 
@@ -695,7 +1039,7 @@ def settings_screen(route):
 def main():
     init_state()
     with st.sidebar:
-        st.markdown("## ✨ Lightsky AI")
+        st.markdown("## \u2728 Lightsky AI")
         st.caption("pro by Krivi and codex")
         model_names = list(core.MODEL_OPTIONS.keys())
         default_index = model_names.index(core.DEFAULT_MODEL_DISPLAY) if core.DEFAULT_MODEL_DISPLAY in model_names else 0
@@ -707,6 +1051,7 @@ def main():
             label_visibility="collapsed",
         )
         st.markdown("---")
+        st.toggle("AI Inter-Test access", key="ai_intertest_enabled")
         st.caption(f"Provider: {provider_display(route['provider'])}")
         st.caption(f"Model ID: {route['model']}")
 

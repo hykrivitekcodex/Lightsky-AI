@@ -1,15 +1,40 @@
-Lightsky AI is a lightweight, modular framework designed to bring intelligence and creativity into your applications. Built with simplicity and scalability in mind, it empowers developers to experiment, prototype, and deploy AI‑driven features without the overhead of complex setups.
+# Lightsky AI pro by Krivi
 
-✨ Key Features
-Modular design – plug in only the components you need.
+Streamlit-first Lightsky AI app with chat, arena, visual browser, Look & Take,
+image generation, GitHub plugin discovery, internal testing, and LS 5.1 debug
+tools.
 
-Customizable workflows – adapt AI pipelines to fit your project.
+## Run Locally
 
-Lightweight performance – optimized for speed and efficiency.
+```powershell
+py -m pip install -r requirements.txt
+py LightSky_AI.py
+```
 
-Creative autonomy – experiment freely with models and data.
+The Streamlit app runs on:
 
-Open-source spirit – transparent, community‑driven development.
+```text
+http://localhost:8501/
+```
 
-🚀 Vision
-Lightsky AI aims to make AI accessible, flexible, and fun. Whether you’re building a prototype, experimenting with generative models, or integrating intelligence into production apps, Lightsky AI provides the foundation to explore and innovate.
+The legacy Tk UI is still available only for local compatibility:
+
+```powershell
+py LightSky_AI.py --tk
+```
+
+## Hosted Streamlit
+
+Use `streamlit_app.py` as the entrypoint. The hosted app must not import Tk.
+Provider keys should be set as environment variables or Streamlit secrets.
+
+Supported secret names:
+
+- `GROQ_API_KEY` or `GROQ_API_KEYS`
+- `COMETAPI_API_KEY`
+- `HF_TOKEN` or `HUGGINGFACE_TOKEN`
+- `XAI_API_KEY`
+- `NVIDIA_API_KEY`
+
+Do not commit `.streamlit/secrets.toml`, logs, downloads, generated images, or
+local cookies.
