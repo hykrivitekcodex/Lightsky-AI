@@ -5,6 +5,7 @@ __pycache__/
 .streamlit/secrets.toml
 lightsky_accounts.json
 lightsky_sessions.json
+lightsky_provider_keys.json
 downloads/
 generated_images/
 intertest_runs/

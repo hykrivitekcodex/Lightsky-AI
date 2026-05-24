@@ -80,17 +80,49 @@ def _env_list(*names: str) -> list[str]:
     return values
 
 
-HF_ACCESS_TOKEN = _env_first("HF_TOKEN", "HUGGINGFACE_TOKEN")
-if HF_ACCESS_TOKEN:
-    os.environ.setdefault("HF_TOKEN", HF_ACCESS_TOKEN)
-    os.environ.setdefault("HUGGINGFACE_TOKEN", HF_ACCESS_TOKEN)
+HF_ACCESS_TOKEN = ""
+GEMINI_API_KEY = ""
+XAI_API_KEY = ""
+NVIDIA_API_KEY = ""
 
-GEMINI_API_KEY = _env_first("GEMINI_API_KEY", "GOOGLE_API_KEY")
+
+def refresh_provider_keys() -> dict[str, bool]:
+    """Refresh provider API keys after Streamlit settings/env changes."""
+    global HF_ACCESS_TOKEN, GEMINI_API_KEY, XAI_API_KEY, NVIDIA_API_KEY
+
+    HF_ACCESS_TOKEN = _env_first("HF_TOKEN", "HUGGINGFACE_TOKEN")
+    if HF_ACCESS_TOKEN:
+        os.environ.setdefault("HF_TOKEN", HF_ACCESS_TOKEN)
+        os.environ.setdefault("HUGGINGFACE_TOKEN", HF_ACCESS_TOKEN)
+
+    GEMINI_API_KEY = _env_first("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    if GEMINI_API_KEY:
+        os.environ.setdefault("GEMINI_API_KEY", GEMINI_API_KEY)
+        os.environ.setdefault("GOOGLE_API_KEY", GEMINI_API_KEY)
+
+    XAI_API_KEY = _env_first("XAI_API_KEY", "XAI_API_TOKEN")
+    if XAI_API_KEY:
+        os.environ.setdefault("XAI_API_KEY", XAI_API_KEY)
+        os.environ.setdefault("XAI_API_TOKEN", XAI_API_KEY)
+
+    NVIDIA_API_KEY = _env_first("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY", "NVIDIA_NGC_API_KEY")
+    if NVIDIA_API_KEY:
+        os.environ.setdefault("NVIDIA_API_KEY", NVIDIA_API_KEY)
+        os.environ.setdefault("NVIDIA_NIM_API_KEY", NVIDIA_API_KEY)
+        os.environ.setdefault("NVIDIA_NGC_API_KEY", NVIDIA_API_KEY)
+
+    return {
+        "gemini": bool(GEMINI_API_KEY),
+        "huggingface": bool(HF_ACCESS_TOKEN),
+        "xai": bool(XAI_API_KEY),
+        "nvidia": bool(NVIDIA_API_KEY),
+    }
+
+
+refresh_provider_keys()
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 XAI_BASE_URL = "https://api.x.ai/v1"
-XAI_API_KEY = _env_first("XAI_API_KEY", "XAI_API_TOKEN")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-NVIDIA_API_KEY = _env_first("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY", "NVIDIA_NGC_API_KEY")
 
 GEMINI_MODELS = {
     "Gemini 2.5 Pro": "gemini-2.5-pro",
@@ -280,8 +312,9 @@ def get_gemini_response(
     system_prompt: str | None = None,
     temperature: float = 0.7,
 ) -> str:
+    refresh_provider_keys()
     if not GEMINI_API_KEY:
-        return "Google Gemini is not configured. Add GEMINI_API_KEY or GOOGLE_API_KEY in environment variables or Streamlit secrets."
+        return "Google Gemini is not configured. Open Settings > Provider keys and add a Gemini API key, or set GEMINI_API_KEY / GOOGLE_API_KEY in environment variables or Streamlit secrets."
 
     payload = {
         "systemInstruction": {"parts": [{"text": _base_system_prompt(system_prompt)}]},
@@ -429,6 +462,7 @@ def get_nvidia_response(
 
 
 def refresh_nvidia_nemotron_models(limit: int = 20) -> list[str]:
+    refresh_provider_keys()
     if not NVIDIA_API_KEY:
         return []
     try:
@@ -487,6 +521,7 @@ def get_huggingface_response(
     system_prompt: str | None = None,
     temperature: float = 0.7,
 ) -> str:
+    refresh_provider_keys()
     if not HF_ACCESS_TOKEN:
         return "Hugging Face is not configured. Add HF_TOKEN or HUGGINGFACE_TOKEN in environment or Streamlit secrets."
 
@@ -557,6 +592,7 @@ def generate_huggingface_image(
     width: int = 1024,
     height: int = 1024,
 ):
+    refresh_provider_keys()
     if not HF_ACCESS_TOKEN:
         return None
     chosen_model = model or DEFAULT_HF_IMAGE_MODEL
@@ -911,6 +947,7 @@ def get_provider_response(
     system_prompt: str | None = None,
     temperature: float | None = None,
 ) -> str:
+    refresh_provider_keys()
     chosen_provider = provider or CURRENT_PROVIDER
     chosen_model = model or CURRENT_MODEL
     chosen_system_prompt = system_prompt if system_prompt is not None else CURRENT_SYSTEM_PROMPT

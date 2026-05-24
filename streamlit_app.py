@@ -35,6 +35,40 @@ except ImportError:
     google_search = None
 
 
+APP_DIR = Path(__file__).resolve().parent
+USER_DATA_DIR = Path(os.environ.get("LIGHTSKY_USER_DATA_DIR", APP_DIR)).resolve()
+PROVIDER_KEYS_STORE = USER_DATA_DIR / "lightsky_provider_keys.json"
+PROVIDER_KEY_NAMES = [
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "HF_TOKEN",
+    "HUGGINGFACE_TOKEN",
+    "XAI_API_KEY",
+    "XAI_API_TOKEN",
+    "NVIDIA_API_KEY",
+    "NVIDIA_NIM_API_KEY",
+    "NVIDIA_NGC_API_KEY",
+]
+
+
+def _read_provider_key_store():
+    if not PROVIDER_KEYS_STORE.exists():
+        return {}
+    try:
+        data = json.loads(PROVIDER_KEYS_STORE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_local_provider_keys_to_env():
+    data = _read_provider_key_store()
+    for key in PROVIDER_KEY_NAMES:
+        value = str(data.get(key) or "").strip()
+        if value and not os.environ.get(key):
+            os.environ[key] = value
+
+
 def _load_streamlit_secrets_to_env():
     keys = [
         "GEMINI_API_KEY",
@@ -69,12 +103,11 @@ def _load_streamlit_secrets_to_env():
 
 
 _load_streamlit_secrets_to_env()
+_load_local_provider_keys_to_env()
 
 import lightsky_core as core
 
 
-APP_DIR = Path(__file__).resolve().parent
-USER_DATA_DIR = Path(os.environ.get("LIGHTSKY_USER_DATA_DIR", APP_DIR)).resolve()
 DOWNLOAD_DIR = USER_DATA_DIR / "downloads"
 PLUGIN_DIR = USER_DATA_DIR / "github_plugins"
 GENERATED_DIR = USER_DATA_DIR / "generated_images"
@@ -85,11 +118,9 @@ SESSION_STORAGE_KEY = "lightsky_ai_session_token"
 SESSION_QUERY_PARAM = "ls_session"
 LABS_URL = "https://lightsky-ai-krivi.streamlit.app/labs"
 LABS_EMAIL = "krivi.ezhil@gmail.com"
-DESKTOP_RELEASE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/tag/v3.0"
-DESKTOP_APP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/download/v3.0/LightskyAIPro.exe"
-DESKTOP_SETUP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/download/v3.0/LightskyAIProSetup.exe"
-DESKTOP_SETUP_SHA256 = "9BE6BE2FBB481C6FDCEBD2E0278ABC3D2C87536815187BBA0FC0EABCC80CCFD5"
-DESKTOP_APP_SHA256 = "7E8BF69176EE145EB7C186D84D992B046CF929940CBA965A25F57A39A2FC4BD7"
+DESKTOP_RELEASE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/tag/v4.0"
+DESKTOP_APP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/download/v4.0/LightskyAIPro.exe"
+DESKTOP_SETUP_EXE_URL = "https://github.com/hykrivitekcodex/Lightsky-AI/releases/download/v4.0/LightskyAIProSetup.exe"
 HOSTED_APP_URL = "https://lightsky-ai-krivi.streamlit.app/?startup=done"
 SAFARI_HTTP_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
@@ -102,7 +133,7 @@ DEFAULT_HTTP_HEADERS = {
 }
 
 for folder in (DOWNLOAD_DIR, PLUGIN_DIR, GENERATED_DIR, INTERTEST_DIR):
-    folder.mkdir(exist_ok=True)
+    folder.mkdir(parents=True, exist_ok=True)
 
 
 st.set_page_config(
@@ -746,6 +777,91 @@ def google_signin_link(label="Sign in with Google"):
 
 def current_user():
     return st.session_state.get("auth_user")
+
+
+def save_provider_keys(values):
+    data = _read_provider_key_store()
+    changed = False
+    for key, value in values.items():
+        clean = str(value or "").strip()
+        if not clean:
+            continue
+        data[key] = clean
+        os.environ[key] = clean
+        changed = True
+
+    if not changed:
+        return False
+
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PROVIDER_KEYS_STORE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    core.refresh_provider_keys()
+    return True
+
+
+def clear_saved_provider_key(*keys):
+    data = _read_provider_key_store()
+    changed = False
+    for key in keys:
+        if key in data:
+            data.pop(key, None)
+            changed = True
+        os.environ.pop(key, None)
+    if changed:
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        PROVIDER_KEYS_STORE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    core.refresh_provider_keys()
+    return changed
+
+
+def render_provider_key_setup():
+    status = core.refresh_provider_keys()
+    st.markdown("#### Provider keys")
+    st.markdown(
+        """
+        <div class="soft-card">
+          <div class="account-name">Gemini needs one private key before models can answer</div>
+          <div class="account-email">Keys are loaded from Streamlit secrets, environment variables, or this device's local ignored config.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if status.get("gemini"):
+        st.success("Google Gemini is configured. Chat should answer from Gemini and LS 5.1 now.")
+    else:
+        st.error("Google Gemini is not configured yet.")
+
+    with st.expander("Add or update API keys", expanded=not status.get("gemini")):
+        gemini_key = st.text_input("Gemini API key", type="password", placeholder="Paste Gemini / Google AI Studio key")
+        hf_key = st.text_input("Hugging Face token", type="password", placeholder="Optional, for image generation fallback")
+        nvidia_key = st.text_input("NVIDIA API key", type="password", placeholder="Optional")
+        xai_key = st.text_input("xAI API key", type="password", placeholder="Optional")
+
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("Save provider keys", type="primary", use_container_width=True):
+                saved = save_provider_keys(
+                    {
+                        "GEMINI_API_KEY": gemini_key,
+                        "GOOGLE_API_KEY": gemini_key,
+                        "HF_TOKEN": hf_key,
+                        "HUGGINGFACE_TOKEN": hf_key,
+                        "NVIDIA_API_KEY": nvidia_key,
+                        "XAI_API_KEY": xai_key,
+                    }
+                )
+                if saved:
+                    st.success("Saved locally. Try Chat again.")
+                    st.rerun()
+                else:
+                    st.warning("Paste at least one key before saving.")
+        with col2:
+            if st.button("Clear saved Gemini key", use_container_width=True):
+                clear_saved_provider_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+                st.info("Saved Gemini key cleared from this device.")
+                st.rerun()
+
+        st.caption("Saved keys stay in the local ignored provider config for this app instance.")
 
 
 def load_session_store():
@@ -1598,7 +1714,7 @@ def render_desktop_download_panel(compact=False):
         f"""
         <div class="soft-card">
           <div class="account-name">Download Lightsky AI for Windows</div>
-          <div class="account-email">Get the desktop app from the official v3.0 release, or open the hosted app in Safari.</div>
+          <div class="account-email">Get the desktop app from the official v4.0 release, or open the hosted app in Safari.</div>
           <div class="account-provider">{escape_text(DESKTOP_RELEASE_URL.replace('https://', ''))}</div>
         </div>
         """,
@@ -1614,11 +1730,8 @@ def render_desktop_download_panel(compact=False):
     with col4:
         st.link_button("Open in Safari / web", HOSTED_APP_URL, use_container_width=True)
     with st.expander("Verify downloads"):
-        st.code(
-            f"LightskyAIPro.exe SHA256\n{DESKTOP_APP_SHA256}\n\n"
-            f"LightskyAIProSetup.exe SHA256\n{DESKTOP_SETUP_SHA256}",
-            language="text",
-        )
+        st.caption("The v4.0 release notes include the current SHA256 values for every uploaded desktop and Android asset.")
+        st.link_button("View SHA256 on GitHub", DESKTOP_RELEASE_URL, use_container_width=True)
 
 
 def render_account_sidebar():
@@ -2214,10 +2327,12 @@ Input:
 def settings_screen(route):
     render_header(route)
     st.markdown("### Settings")
+    render_provider_key_setup()
     render_desktop_download_panel()
     st.write("Launch the Streamlit app locally with:")
     st.code("py -m streamlit run streamlit_app.py", language="powershell")
     st.markdown("#### Providers")
+    core.refresh_provider_keys()
     rows = [
         ("Google Gemini", bool(core.GEMINI_API_KEY), len(core.GEMINI_MODELS)),
         ("Hugging Face", bool(core.HF_ACCESS_TOKEN), len(core.HUGGINGFACE_MODELS)),

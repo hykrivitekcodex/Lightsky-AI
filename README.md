@@ -21,6 +21,8 @@ http://localhost:8501/
 
 Use `streamlit_app.py` as the entrypoint. The hosted app must not import Tk.
 Provider keys should be set as environment variables or Streamlit secrets.
+For local desktop use, you can also open Settings -> Provider keys and save a
+Gemini key to the local ignored `lightsky_provider_keys.json` file.
 
 Supported secret names:
 
@@ -41,8 +43,8 @@ using salted PBKDF2 password hashes. Browser refresh persistence uses
 device-specific session tokens saved in `lightsky_sessions.json`. Both files are
 ignored by git.
 
-Do not commit `.streamlit/secrets.toml`, logs, downloads, generated images, or
-local cookies.
+Do not commit `.streamlit/secrets.toml`, `lightsky_provider_keys.json`, logs,
+downloads, generated images, or local cookies.
 
 ## Windows Installer
 
