@@ -85,39 +85,19 @@ if HF_ACCESS_TOKEN:
     os.environ.setdefault("HF_TOKEN", HF_ACCESS_TOKEN)
     os.environ.setdefault("HUGGINGFACE_TOKEN", HF_ACCESS_TOKEN)
 
-API_KEYS = _env_list("GROQ_API_KEYS", "GROQ_API_KEY")
-ORG_ID = "org_01kr8zg3jxfr7v0hfdf0248dt5"
-BASE_URL = "https://api.groq.com/openai/v1"
-COMETAPI_BASE_URL = "https://api.cometapi.com/v1"
-COMETAPI_KEY = _env_first("COMETAPI_API_KEY")
+GEMINI_API_KEY = _env_first("GEMINI_API_KEY", "GOOGLE_API_KEY")
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 XAI_BASE_URL = "https://api.x.ai/v1"
 XAI_API_KEY = _env_first("XAI_API_KEY", "XAI_API_TOKEN")
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_API_KEY = _env_first("NVIDIA_API_KEY", "NVIDIA_NIM_API_KEY", "NVIDIA_NGC_API_KEY")
 
-MODELS = {
-    "Groq Compound": "groq/compound",
-    "Groq Compound Mini": "groq/compound-mini",
-    "Llama 3.1 8B": "llama-3.1-8b-instant",
-    "Llama 3.3 70B": "llama-3.3-70b-versatile",
-    "Llama 4 Scout 17B": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "Llama Prompt Guard 22M": "meta-llama/llama-prompt-guard-2-22m",
-    "Llama Prompt Guard 86M": "meta-llama/llama-prompt-guard-2-86m",
-    "GPT-OSS 120B": "openai/gpt-oss-120b",
-    "GPT-OSS 20B": "openai/gpt-oss-20b",
-    "GPT-OSS Safeguard 20B": "openai/gpt-oss-safeguard-20b",
-    "Qwen 3 32B": "qwen/qwen3-32b",
-}
-
-COMET_MODELS = {
-    "GPT-5.4": "gpt-5.4",
-    "GPT-5.2 Chat": "gpt-5.2-chat-latest",
-    "GPT-5.2": "gpt-5.2",
-    "GPT-4.1": "gpt-4.1",
-    "Claude Sonnet 4.5": "claude-sonnet-4-5",
+GEMINI_MODELS = {
     "Gemini 2.5 Pro": "gemini-2.5-pro",
-    "DeepSeek V3.2": "deepseek-v3.2",
-    "Qwen 3 Max": "qwen3-max",
+    "Gemini 2.5 Flash": "gemini-2.5-flash",
+    "Gemini 2.5 Flash Lite": "gemini-2.5-flash-lite",
+    "Gemini 2.0 Flash": "gemini-2.0-flash",
+    "Gemini 2.0 Flash Lite": "gemini-2.0-flash-lite",
 }
 
 HUGGINGFACE_MODELS = {
@@ -152,7 +132,7 @@ HUGGINGFACE_IMAGE_MODELS = {
 DEFAULT_HF_TEXT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 DEFAULT_HF_IMAGE_MODEL = "stabilityai/stable-diffusion-xl-base-1.0"
 
-LS_51_MODEL_ID = "gpt-5.4"
+LS_51_MODEL_ID = "gemini-2.5-flash"
 LS_51_SYSTEM_PROMPT = """You are LS 5.1, a custom chatbot model developed by Lightsky AI pro by krivi.
 You are designed to feel powerful, imaginative, emotionally intelligent, and useful.
 You combine the clarity of a senior engineer, the imagination of a world-builder, the taste of a premium product designer, and the calm judgment of a research partner.
@@ -169,15 +149,13 @@ MODEL_OPTIONS = {
     "\u2728 LS 5.1 (custom)": {
         "provider": "ls_custom",
         "model": LS_51_MODEL_ID,
-        "base_provider": "cometapi",
+        "base_provider": "gemini",
         "system_prompt": LS_51_SYSTEM_PROMPT,
         "temperature": 0.82,
     }
 }
-for display_name, model_id in MODELS.items():
-    MODEL_OPTIONS[f"Groq / {display_name}"] = {"provider": "groq", "model": model_id}
-for display_name, model_id in COMET_MODELS.items():
-    MODEL_OPTIONS[f"CometAPI / {display_name}"] = {"provider": "cometapi", "model": model_id}
+for display_name, model_id in GEMINI_MODELS.items():
+    MODEL_OPTIONS[f"Google Gemini / {display_name}"] = {"provider": "gemini", "model": model_id}
 for display_name, model_id in HUGGINGFACE_MODELS.items():
     MODEL_OPTIONS[f"Hugging Face / {display_name}"] = {"provider": "huggingface", "model": model_id}
 for display_name, model_id in XAI_MODELS.items():
@@ -185,10 +163,10 @@ for display_name, model_id in XAI_MODELS.items():
 for display_name, model_id in NVIDIA_NEMOTRON_MODELS.items():
     MODEL_OPTIONS[f"NVIDIA / {display_name}"] = {"provider": "nvidia", "model": model_id}
 
-DEFAULT_MODEL_DISPLAY = "Groq / Llama 3.3 70B"
+DEFAULT_MODEL_DISPLAY = "Google Gemini / Gemini 2.5 Flash"
 DEFAULT_MODEL_CONFIG = MODEL_OPTIONS.get(DEFAULT_MODEL_DISPLAY, next(iter(MODEL_OPTIONS.values())))
 CURRENT_MODEL = DEFAULT_MODEL_CONFIG.get("model")
-CURRENT_PROVIDER = DEFAULT_MODEL_CONFIG.get("provider", "groq")
+CURRENT_PROVIDER = DEFAULT_MODEL_CONFIG.get("provider", "gemini")
 CURRENT_SYSTEM_PROMPT = DEFAULT_MODEL_CONFIG.get(
     "system_prompt",
     "You are Lightsky AI pro by krivi, a helpful desktop assistant.",
@@ -228,9 +206,6 @@ Example:
 After the app returns Inter-Test output, use it to produce the final answer.
 Always keep code output in fenced code blocks with a language label.
 """
-
-current_api_index = 0
-
 
 def _base_system_prompt(system_prompt: str | None = None) -> str:
     content = system_prompt or (
@@ -273,53 +248,85 @@ def _extract_openai_compatible_text(result: dict) -> tuple[str, str | None]:
     return str(content).strip(), finish_reason
 
 
-def get_groq_response(
+def _gemini_model_path(model: str) -> str:
+    raw = (model or "gemini-2.5-flash").strip()
+    if raw.startswith("models/"):
+        return raw
+    return f"models/{raw}"
+
+
+def _extract_gemini_text(data: dict) -> tuple[str, str | None]:
+    candidates = data.get("candidates") or []
+    finish_reason = None
+    parts_out: list[str] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        finish_reason = candidate.get("finishReason") or finish_reason
+        content = candidate.get("content") or {}
+        for part in content.get("parts") or []:
+            if isinstance(part, dict):
+                text = part.get("text")
+                if text:
+                    parts_out.append(str(text))
+    return "\n".join(parts_out).strip(), finish_reason
+
+
+def get_gemini_response(
     prompt: str,
-    model: str = "llama-3.1-8b-instant",
-    max_tokens: int = 150,
-    max_retries: int = 3,
+    model: str = "gemini-2.5-flash",
+    max_tokens: int = 300,
+    max_retries: int = 2,
     system_prompt: str | None = None,
     temperature: float = 0.7,
 ) -> str:
-    global current_api_index
-    if not API_KEYS:
-        return "Groq is not configured. Set GROQ_API_KEY or GROQ_API_KEYS in your environment or Streamlit secrets."
+    if not GEMINI_API_KEY:
+        return "Google Gemini is not configured. Add GEMINI_API_KEY or GOOGLE_API_KEY in environment variables or Streamlit secrets."
+
+    payload = {
+        "systemInstruction": {"parts": [{"text": _base_system_prompt(system_prompt)}]},
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": prompt}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+    }
+    model_path = _gemini_model_path(model)
+    url = f"{GEMINI_BASE_URL}/{model_path}:generateContent"
 
     for retry in range(max_retries):
-        for attempt in range(len(API_KEYS)):
-            api_key = API_KEYS[(current_api_index + attempt) % len(API_KEYS)]
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Groq-Organization": ORG_ID,
-            }
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": _base_system_prompt(system_prompt)},
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            }
-            try:
-                if retry > 0:
-                    time.sleep(min(2**retry, 8))
-                response = requests.post(f"{BASE_URL}/chat/completions", headers=headers, json=payload, timeout=45)
-                if response.status_code == 200:
-                    current_api_index = (current_api_index + attempt) % len(API_KEYS)
-                    text, finish_reason = _extract_openai_compatible_text(response.json())
-                    return text or f"Groq returned an empty message (finish reason: {finish_reason or 'unknown'})."
-                if response.status_code in (429, 500, 502, 503, 504):
-                    continue
-                return f"Groq returned an error: {response.status_code}. Try a different model or check model access."
-            except requests.exceptions.Timeout:
+        try:
+            if retry > 0:
+                time.sleep(min(2**retry, 6))
+            response = requests.post(url, headers=headers, json=payload, timeout=75)
+            if response.status_code == 200:
+                text, finish_reason = _extract_gemini_text(response.json())
+                return text or f"Google Gemini returned an empty message (finish reason: {finish_reason or 'unknown'})."
+            if response.status_code == 429:
+                body = response.text[:700].lower()
+                if any(term in body for term in ("quota", "rate", "limit", "exhausted")):
+                    return "Google Gemini is configured, but the key appears to be rate-limited or out of quota."
                 continue
-            except requests.exceptions.ConnectionError:
+            if response.status_code in (500, 502, 503, 504):
                 continue
-            except Exception as exc:
-                return f"Groq request error: {exc}"
-    return "Groq is not responding right now. Please try again in a moment."
+            body = response.text[:700]
+            return f"Google Gemini returned an error: {response.status_code}. {body}"
+        except requests.exceptions.Timeout:
+            continue
+        except requests.exceptions.ConnectionError:
+            continue
+        except Exception as exc:
+            return f"Google Gemini request error: {exc}"
+    return "Google Gemini is not responding right now. Please try again in a moment."
 
 
 def get_openai_compatible_response(
@@ -379,28 +386,6 @@ def get_openai_compatible_response(
         except Exception as exc:
             return f"{provider_name} request error: {exc}"
     return f"{provider_name} is not responding right now. Please try again in a moment."
-
-
-def get_cometapi_response(
-    prompt: str,
-    model: str = "gpt-5.2-chat-latest",
-    max_tokens: int = 300,
-    max_retries: int = 2,
-    system_prompt: str | None = None,
-    temperature: float = 0.7,
-) -> str:
-    return get_openai_compatible_response(
-        prompt,
-        "CometAPI",
-        COMETAPI_BASE_URL,
-        COMETAPI_KEY,
-        model,
-        max_tokens=max_tokens,
-        max_retries=max_retries,
-        system_prompt=system_prompt,
-        temperature=temperature,
-        timeout=60,
-    )
 
 
 def get_xai_response(
@@ -909,7 +894,7 @@ def ls51_power_response(
         mode_notes.append(web_context)
 
     enhanced_prompt = "\n\n".join(mode_notes + [f"User request:\n{prompt}"])
-    return get_cometapi_response(
+    return get_gemini_response(
         enhanced_prompt,
         model=chosen_model,
         max_tokens=max_tokens,
@@ -940,28 +925,28 @@ def get_provider_response(
                 system_prompt=chosen_system_prompt,
                 temperature=chosen_temperature,
             )
-        return get_cometapi_response(prompt, chosen_model or LS_51_MODEL_ID, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
-    if chosen_provider == "cometapi":
-        return get_cometapi_response(prompt, chosen_model, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
+        return get_gemini_response(prompt, chosen_model or LS_51_MODEL_ID, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
+    if chosen_provider == "gemini":
+        return get_gemini_response(prompt, chosen_model, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
     if chosen_provider == "huggingface":
         return get_huggingface_response(prompt, chosen_model, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
     if chosen_provider == "xai":
         return get_xai_response(prompt, chosen_model, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
     if chosen_provider == "nvidia":
         return get_nvidia_response(prompt, chosen_model, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
-    return get_groq_response(prompt, chosen_model, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
+    return get_gemini_response(prompt, chosen_model, max_tokens, system_prompt=chosen_system_prompt, temperature=chosen_temperature)
 
 
 def provider_display_name(provider: str | None = None) -> str:
     chosen_provider = provider or CURRENT_PROVIDER
     if chosen_provider == "ls_custom":
         return "LS 5.1"
-    if chosen_provider == "cometapi":
-        return "CometAPI"
+    if chosen_provider == "gemini":
+        return "Google Gemini"
     if chosen_provider == "huggingface":
         return "Hugging Face"
     if chosen_provider == "xai":
         return "xAI Grok"
     if chosen_provider == "nvidia":
         return "NVIDIA Nemotron"
-    return "Groq"
+    return "Google Gemini"

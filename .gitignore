@@ -9,3 +9,7 @@ downloads/
 generated_images/
 intertest_runs/
 *.db
+android/LightskyAIPro/build/
+android/LightskyAIPro/tools/
+android/LightskyAIPro/*.jks
+dist/*.idsig

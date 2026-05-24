@@ -1,8 +1,8 @@
 # Lightsky AI pro by Krivi
 
-Streamlit-first Lightsky AI app with chat, arena, visual browser, Look & Take,
-image generation, GitHub plugin discovery, internal testing, and LS 5.1 debug
-tools. Labs collaboration is shown at `https://lightsky-ai-krivi.streamlit.app/labs`.
+Streamlit-first Lightsky AI app with chat image generation, arena, visual
+browser, Look & Take, GitHub plugin discovery, internal testing, and LS 5.1
+debug tools. Labs collaboration is shown at `https://lightsky-ai-krivi.streamlit.app/labs`.
 
 ## Run Locally
 
@@ -24,8 +24,7 @@ Provider keys should be set as environment variables or Streamlit secrets.
 
 Supported secret names:
 
-- `GROQ_API_KEY` or `GROQ_API_KEYS`
-- `COMETAPI_API_KEY`
+- `GEMINI_API_KEY` or `GOOGLE_API_KEY`
 - `HF_TOKEN` or `HUGGINGFACE_TOKEN`
 - `XAI_API_KEY`
 - `NVIDIA_API_KEY`
@@ -56,3 +55,27 @@ The NSIS installer is built from `installer/LightskyAIPro.nsi`:
 The generated installer is `dist/LightskyAIProSetup.exe`. It installs the app
 per user, creates Start Menu/Desktop shortcuts, and launches Streamlit through
 `LaunchLightskyAI.cmd`.
+
+## Android APK
+
+The Android WebView shell lives in `android/LightskyAIPro` and opens the hosted
+Lightsky app with downloads, file picker uploads, back navigation, and an
+offline reload screen.
+
+Build the debug APK:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File android/LightskyAIPro/build-apk.ps1
+```
+
+Output:
+
+```text
+dist/LightskyAIPro-android-debug.apk
+```
+
+Install on a connected Android device:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File android/LightskyAIPro/install-apk.ps1
+```

@@ -37,9 +37,8 @@ except ImportError:
 
 def _load_streamlit_secrets_to_env():
     keys = [
-        "GROQ_API_KEY",
-        "GROQ_API_KEYS",
-        "COMETAPI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
         "HF_TOKEN",
         "HUGGINGFACE_TOKEN",
         "XAI_API_KEY",
@@ -1127,8 +1126,7 @@ def provider_display(provider):
 
 def model_clean(display):
     return (
-        display.replace("Groq / ", "")
-        .replace("CometAPI / ", "")
+        display.replace("Google Gemini / ", "")
         .replace("Hugging Face / ", "")
         .replace("xAI / ", "")
         .replace("NVIDIA / ", "")
@@ -1139,7 +1137,7 @@ def route_from_display(display):
     config = core.MODEL_OPTIONS.get(display, core.DEFAULT_MODEL_CONFIG)
     return {
         "display": display,
-        "provider": config.get("provider", "groq"),
+        "provider": config.get("provider", "gemini"),
         "model": config.get("model"),
         "system_prompt": config.get("system_prompt", "You are Lightsky AI pro by krivi, a helpful assistant."),
         "temperature": config.get("temperature", 0.7),
@@ -1461,7 +1459,7 @@ def init_state():
     st.session_state.setdefault("messages", [
         {
             "role": "assistant",
-            "content": "Chat is ready. Pick any model and I will answer from exactly that selected model.",
+            "content": "Chat is ready. Pick any model and I will answer from exactly that selected model. Ask me to generate an image and it will appear right here.",
             "source": "Lightsky AI pro",
             "sources": [],
         }
@@ -1471,8 +1469,8 @@ def init_state():
     st.session_state.setdefault("look_details", "")
     st.session_state.setdefault("github_results", [])
     st.session_state.setdefault("last_download", None)
-    st.session_state.setdefault("intertest_runs", [])
     st.session_state.setdefault("ai_intertest_enabled", True)
+    st.session_state.setdefault("intertest_runs", [])
     st.session_state.setdefault("auth_user", None)
     st.session_state.setdefault("auth_error", "")
     st.session_state.setdefault("google_oauth_state", "")
@@ -1492,11 +1490,64 @@ def append_sources(response, sources):
     return response + "\n".join(lines)
 
 
+IMAGE_INTENT_PATTERNS = (
+    r"\b(generate|create|make|draw|render|design|paint|illustrate)\b.*\b(image|picture|photo|poster|wallpaper|logo|art|illustration|icon|avatar)\b",
+    r"\b(image|picture|photo|poster|wallpaper|logo|art|illustration|icon|avatar)\b.*\b(of|for|about|showing|with)\b",
+    r"\btext[- ]to[- ]image\b",
+    r"^\s*image\s+prompt\s*:",
+    r"\b(draw|paint|illustrate)\b\s+.{3,}",
+)
+
+
+def is_image_generation_prompt(prompt):
+    text = (prompt or "").strip().lower()
+    if not text:
+        return False
+    return any(re.search(pattern, text, re.I) for pattern in IMAGE_INTENT_PATTERNS)
+
+
+def clean_image_prompt(prompt):
+    text = (prompt or "").strip()
+    text = re.sub(
+        r"(?i)^\s*(please\s+)?(generate|create|make|draw|render|design|paint|illustrate)\s+(an?\s+)?(image|picture|photo|poster|wallpaper|logo|art|illustration|icon|avatar)\s*(of|for|about)?\s*",
+        "",
+        text,
+    ).strip()
+    return text or prompt.strip()
+
+
+def generate_chat_image(prompt, size=1024):
+    image_prompt = clean_image_prompt(prompt)
+    image = core.generate_huggingface_image(
+        image_prompt,
+        model=core.HUGGINGFACE_IMAGE_MODELS.get("FLUX Schnell", core.DEFAULT_HF_IMAGE_MODEL),
+        width=size,
+        height=size,
+    )
+    used_fallback = image is None
+    if used_fallback:
+        image = fallback_image(image_prompt, size, size)
+    out = GENERATED_DIR / f"chat_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    image.save(out)
+    return str(out), image_prompt, used_fallback
+
+
 def chat_screen(route):
     render_header(route)
-    for item in st.session_state.messages:
+    for index, item in enumerate(st.session_state.messages):
         with st.chat_message(item["role"]):
             st.markdown(item["content"])
+            if item.get("image_path"):
+                image_path = Path(item["image_path"])
+                if image_path.exists():
+                    st.image(str(image_path), use_container_width=True)
+                    st.download_button(
+                        "Download image",
+                        image_path.read_bytes(),
+                        file_name=image_path.name,
+                        mime="image/png",
+                        key=f"chat_image_download_{index}_{image_path.stem}",
+                    )
             if item.get("sources"):
                 with st.expander("Sources"):
                     for src in item["sources"]:
@@ -1508,16 +1559,31 @@ def chat_screen(route):
     prompt = st.chat_input("Ask for follow-up changes")
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt, "source": "You", "sources": []})
-        with st.spinner(f"\u2728 {provider_display(route['provider'])} / {model_clean(route['display'])} is thinking..."):
-            response, sources, intertest_result = run_model_with_intertest(prompt, route, max_tokens=900, web=True)
-            response = append_sources(response or "The selected model did not return a response.", sources)
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response,
-            "source": f"{provider_display(route['provider'])} / {model_clean(route['display'])}",
-            "sources": sources,
-            "intertest": intertest_result,
-        })
+        if is_image_generation_prompt(prompt):
+            with st.spinner("\u2728 Generating image in chat..."):
+                image_path, image_prompt, used_fallback = generate_chat_image(prompt)
+            note = f"Generated image for: **{image_prompt}**"
+            if used_fallback:
+                note += "\n\nHugging Face image generation is unavailable, so I made a local Lightsky fallback image."
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": note,
+                "source": "Lightsky image generation",
+                "sources": [],
+                "image_path": image_path,
+                "image_prompt": image_prompt,
+            })
+        else:
+            with st.spinner(f"\u2728 {provider_display(route['provider'])} / {model_clean(route['display'])} is thinking..."):
+                response, sources, intertest_result = run_model_with_intertest(prompt, route, max_tokens=900, web=True)
+                response = append_sources(response or "The selected model did not return a response.", sources)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response,
+                "source": f"{provider_display(route['provider'])} / {model_clean(route['display'])}",
+                "sources": sources,
+                "intertest": intertest_result,
+            })
         st.rerun()
 
 
@@ -1946,32 +2012,9 @@ def fallback_image(prompt, width=1024, height=1024):
     colors = ["#67e8f9", "#7c9cff", "#c084fc", "#f472b6", "#facc15", "#4ade80"]
     for i, color in enumerate(colors):
         draw.rounded_rectangle([70 + i * 35, 90 + i * 34, width - 70 - i * 28, height - 120 + i * 8], radius=42, outline=color, width=7)
-    draw.text((90, height - 190), "Lightsky Image Studio", fill="#172033")
+    draw.text((90, height - 190), "Lightsky chat image", fill="#172033")
     draw.text((90, height - 150), textwrap.shorten(prompt, width=80), fill="#667085")
     return image
-
-
-def image_screen(route):
-    render_header(route)
-    st.markdown("### Image Studio")
-    prompt = st.text_area("Prompt", height=130, placeholder="Complex image generation prompt...")
-    model_name = st.selectbox("Image model", list(core.HUGGINGFACE_IMAGE_MODELS.keys()))
-    size = st.select_slider("Size", options=[512, 768, 1024], value=1024)
-    if st.button("Generate image", type="primary"):
-        if not prompt.strip():
-            st.warning("Enter an image prompt first.")
-        else:
-            with st.spinner("\u2728 Generating image..."):
-                image = core.generate_huggingface_image(prompt, model=core.HUGGINGFACE_IMAGE_MODELS[model_name], width=size, height=size)
-                if image is None:
-                    image = fallback_image(prompt, size, size)
-                out = GENERATED_DIR / f"lightsky_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                image.save(out)
-                st.session_state.generated_image = str(out)
-    if st.session_state.get("generated_image"):
-        st.image(st.session_state.generated_image, use_container_width=True)
-        with open(st.session_state.generated_image, "rb") as f:
-            st.download_button("Download image", f.read(), file_name=Path(st.session_state.generated_image).name)
 
 
 def installed_plugins():
@@ -2176,8 +2219,7 @@ def settings_screen(route):
     st.code("py -m streamlit run streamlit_app.py", language="powershell")
     st.markdown("#### Providers")
     rows = [
-        ("Groq", True, len(core.MODELS)),
-        ("CometAPI", bool(core.COMETAPI_KEY), len(core.COMET_MODELS)),
+        ("Google Gemini", bool(core.GEMINI_API_KEY), len(core.GEMINI_MODELS)),
         ("Hugging Face", bool(core.HF_ACCESS_TOKEN), len(core.HUGGINGFACE_MODELS)),
         ("xAI Grok", bool(core.XAI_API_KEY), len(core.XAI_MODELS)),
         ("NVIDIA Nemotron", bool(core.NVIDIA_API_KEY), len(core.NVIDIA_NEMOTRON_MODELS)),
@@ -2212,7 +2254,7 @@ def main():
         render_account_sidebar()
         nav = st.radio(
             "Workspace",
-            ["Chat", "Account", "Labs", "Arena", "Browser", "Look & Take", "Image Studio", "Plugin Center", "Inter-Test", "Debug LS 5.1", "Settings"],
+            ["Chat", "Account", "Labs", "Arena", "Browser", "Look & Take", "Plugin Center", "Inter-Test", "Debug LS 5.1", "Settings"],
             label_visibility="collapsed",
         )
         st.markdown("---")
@@ -2232,8 +2274,6 @@ def main():
         browser_screen(route)
     elif nav == "Look & Take":
         look_take_screen(route)
-    elif nav == "Image Studio":
-        image_screen(route)
     elif nav == "Plugin Center":
         plugins_screen(route)
     elif nav == "Inter-Test":
