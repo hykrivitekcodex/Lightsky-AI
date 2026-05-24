@@ -1634,18 +1634,19 @@ def clean_image_prompt(prompt):
 
 def generate_chat_image(prompt, size=1024):
     image_prompt = clean_image_prompt(prompt)
-    image = core.generate_huggingface_image(
+    result = core.generate_huggingface_image_result(
         image_prompt,
         model=core.HUGGINGFACE_IMAGE_MODELS.get("FLUX Schnell", core.DEFAULT_HF_IMAGE_MODEL),
         width=size,
         height=size,
     )
+    image = result.get("image")
     used_fallback = image is None
     if used_fallback:
         image = fallback_image(image_prompt, size, size)
     out = GENERATED_DIR / f"chat_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
     image.save(out)
-    return str(out), image_prompt, used_fallback
+    return str(out), image_prompt, used_fallback, result
 
 
 def chat_screen(route):
@@ -1677,10 +1678,14 @@ def chat_screen(route):
         st.session_state.messages.append({"role": "user", "content": prompt, "source": "You", "sources": []})
         if is_image_generation_prompt(prompt):
             with st.spinner("\u2728 Generating image in chat..."):
-                image_path, image_prompt, used_fallback = generate_chat_image(prompt)
+                image_path, image_prompt, used_fallback, image_result = generate_chat_image(prompt)
             note = f"Generated image for: **{image_prompt}**"
             if used_fallback:
-                note += "\n\nHugging Face image generation is unavailable, so I made a local Lightsky fallback image."
+                note += "\n\nHugging Face did not return an image, so I made a local Lightsky fallback image."
+                if image_result.get("error"):
+                    note += f"\n\nHF status: {image_result['error']}"
+            else:
+                note += f"\n\nGenerated with Hugging Face `{image_result.get('provider')}` / `{image_result.get('model')}`."
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": note,

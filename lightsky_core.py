@@ -157,12 +157,13 @@ NVIDIA_NEMOTRON_MODELS = {
 }
 
 HUGGINGFACE_IMAGE_MODELS = {
-    "SDXL Base": "stabilityai/stable-diffusion-xl-base-1.0",
     "FLUX Schnell": "black-forest-labs/FLUX.1-schnell",
+    "SDXL Base": "stabilityai/stable-diffusion-xl-base-1.0",
+    "Hyper SD": "ByteDance/Hyper-SD",
 }
 
 DEFAULT_HF_TEXT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
-DEFAULT_HF_IMAGE_MODEL = "stabilityai/stable-diffusion-xl-base-1.0"
+DEFAULT_HF_IMAGE_MODEL = "black-forest-labs/FLUX.1-schnell"
 
 LS_51_MODEL_ID = "gemini-2.5-flash"
 LS_51_SYSTEM_PROMPT = """You are LS 5.1, a custom chatbot model developed by Lightsky AI pro by krivi.
@@ -586,40 +587,104 @@ def get_huggingface_response(
     return f"Hugging Face returned an error: {last_error or 'no response'}"
 
 
+def _short_hf_error(exc: Exception) -> str:
+    message = str(exc or "").strip()
+    message = re.sub(r"hf_[A-Za-z0-9_\\-]+", "hf_***", message)
+    message = re.sub(r"Bearer\\s+[A-Za-z0-9_\\-.]+", "Bearer ***", message, flags=re.I)
+    return message[:700] or exc.__class__.__name__
+
+
+def generate_huggingface_image_result(
+    prompt: str,
+    model: str = DEFAULT_HF_IMAGE_MODEL,
+    width: int = 1024,
+    height: int = 1024,
+) -> dict:
+    refresh_provider_keys()
+    if not HF_ACCESS_TOKEN:
+        return {
+            "image": None,
+            "model": model or DEFAULT_HF_IMAGE_MODEL,
+            "provider": "huggingface",
+            "error": "Hugging Face image generation needs HF_TOKEN or HUGGINGFACE_TOKEN in Streamlit secrets or Settings > Provider keys.",
+        }
+
+    chosen_models = []
+    for item in (model, DEFAULT_HF_IMAGE_MODEL, *HUGGINGFACE_IMAGE_MODELS.values()):
+        if item and item not in chosen_models:
+            chosen_models.append(item)
+    errors = []
+
+    if HAS_HUGGINGFACE_HUB and InferenceClient is not None:
+        for provider in ("auto", "hf-inference"):
+            try:
+                client = InferenceClient(provider=provider, api_key=HF_ACCESS_TOKEN, timeout=120)
+            except TypeError:
+                try:
+                    client = InferenceClient(provider=provider, token=HF_ACCESS_TOKEN, timeout=120)
+                except TypeError:
+                    client = InferenceClient(token=HF_ACCESS_TOKEN, timeout=120)
+            for chosen_model in chosen_models:
+                try:
+                    image = client.text_to_image(
+                        prompt,
+                        model=chosen_model,
+                        width=width,
+                        height=height,
+                        num_inference_steps=5 if "FLUX.1-schnell" in chosen_model else None,
+                    )
+                    if image is not None:
+                        return {
+                            "image": image.convert("RGB") if hasattr(image, "convert") else image,
+                            "model": chosen_model,
+                            "provider": provider,
+                            "error": "",
+                        }
+                except Exception as exc:
+                    errors.append(f"{provider}/{chosen_model}: {_short_hf_error(exc)}")
+
+    for chosen_model in chosen_models:
+        try:
+            parameters = {"width": width, "height": height}
+            if "FLUX.1-schnell" in chosen_model:
+                parameters["num_inference_steps"] = 5
+            response = requests.post(
+                f"https://api-inference.huggingface.co/models/{chosen_model}",
+                headers={"Authorization": f"Bearer {HF_ACCESS_TOKEN}"},
+                json={
+                    "inputs": prompt,
+                    "parameters": parameters,
+                    "options": {"wait_for_model": True},
+                },
+                timeout=120,
+            )
+            content_type = response.headers.get("content-type", "")
+            if response.status_code == 200 and "image" in content_type:
+                return {
+                    "image": Image.open(BytesIO(response.content)).convert("RGB"),
+                    "model": chosen_model,
+                    "provider": "api-inference",
+                    "error": "",
+                }
+            errors.append(f"api-inference/{chosen_model}: {response.status_code} {response.text[:350]}")
+        except Exception as exc:
+            errors.append(f"api-inference/{chosen_model}: {_short_hf_error(exc)}")
+
+    return {
+        "image": None,
+        "model": model or DEFAULT_HF_IMAGE_MODEL,
+        "provider": "huggingface",
+        "error": " | ".join(errors[-4:]) or "Hugging Face did not return an image.",
+    }
+
+
 def generate_huggingface_image(
     prompt: str,
     model: str = DEFAULT_HF_IMAGE_MODEL,
     width: int = 1024,
     height: int = 1024,
 ):
-    refresh_provider_keys()
-    if not HF_ACCESS_TOKEN:
-        return None
-    chosen_model = model or DEFAULT_HF_IMAGE_MODEL
-    if HAS_HUGGINGFACE_HUB and InferenceClient is not None:
-        try:
-            client = InferenceClient(model=chosen_model, token=HF_ACCESS_TOKEN, timeout=100)
-            image = client.text_to_image(prompt, width=width, height=height)
-            return image.convert("RGB") if hasattr(image, "convert") else image
-        except Exception:
-            pass
-    try:
-        response = requests.post(
-            f"https://api-inference.huggingface.co/models/{chosen_model}",
-            headers={"Authorization": f"Bearer {HF_ACCESS_TOKEN}"},
-            json={
-                "inputs": prompt,
-                "parameters": {"width": width, "height": height},
-                "options": {"wait_for_model": True},
-            },
-            timeout=100,
-        )
-        content_type = response.headers.get("content-type", "")
-        if response.status_code == 200 and "image" in content_type:
-            return Image.open(BytesIO(response.content)).convert("RGB")
-    except Exception:
-        pass
-    return None
+    return generate_huggingface_image_result(prompt, model=model, width=width, height=height).get("image")
 
 
 def _ls51_prompt_profile(prompt: str) -> str:
