@@ -1,16 +1,52 @@
+```
+# Compiled and build artifacts
+*.pyc
 __pycache__/
-*.py[cod]
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.class
+*.out
+
+# Dependencies
+.venv/
+venv/
+node_modules/
+dist/
+build/
+target/
+.gradle/
+
+# Logs and temp files
 *.log
-.google-cookie
-.streamlit/secrets.toml
-lightsky_accounts.json
-lightsky_sessions.json
-lightsky_provider_keys.json
-downloads/
-generated_images/
-intertest_runs/
-*.db
-android/LightskyAIPro/build/
-android/LightskyAIPro/tools/
-android/LightskyAIPro/*.jks
-dist/*.idsig
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Python specific
+.mypy_cache/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+```
