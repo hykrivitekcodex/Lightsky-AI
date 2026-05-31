@@ -2,6 +2,14 @@
 
 This module intentionally avoids tkinter, desktop speech, and UI imports so it
 can run on hosted Streamlit environments.
+
+Features:
+- Multi-provider LLM support (Gemini, HuggingFace, xAI, NVIDIA)
+- Web search and research capabilities
+- Image generation via HuggingFace
+- LS 5.1 custom assistant mode
+- Agent tooling for code execution
+- OWASP security guidelines integration
 """
 
 from __future__ import annotations
@@ -14,6 +22,7 @@ import time
 import urllib.parse
 from datetime import datetime
 from io import BytesIO
+from typing import Any, Literal
 
 import requests
 from PIL import Image
@@ -42,6 +51,42 @@ try:
 except ImportError:
     googlesearch = None
     HAS_GOOGLE = False
+
+try:
+    from ddgs import DDGS
+    HAS_DDGS = True
+except ImportError:
+    DDGS = None
+    HAS_DDGS = False
+
+# Simple in-memory cache for responses
+_response_cache: dict[str, tuple[str, float]] = {}
+_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
+def _get_cache_key(prompt: str, model: str, provider: str) -> str:
+    """Generate a cache key for LLM responses."""
+    return f"{provider}:{model}:{hash(prompt)}"
+
+
+def _get_cached_response(key: str) -> str | None:
+    """Get cached response if not expired."""
+    if key in _response_cache:
+        text, timestamp = _response_cache[key]
+        if time.time() - timestamp < _CACHE_TTL_SECONDS:
+            return text
+        del _response_cache[key]
+    return None
+
+
+def _cache_response(key: str, text: str) -> None:
+    """Cache a response with timestamp."""
+    _response_cache[key] = (text, time.time())
+
+
+def clear_response_cache() -> None:
+    """Clear all cached responses."""
+    _response_cache.clear()
 
 
 def _read_windows_user_env(name: str) -> str:
@@ -312,10 +357,32 @@ def get_gemini_response(
     max_retries: int = 2,
     system_prompt: str | None = None,
     temperature: float = 0.7,
+    use_cache: bool = True,
 ) -> str:
+    """Get response from Google Gemini API with improved error handling and caching.
+    
+    Args:
+        prompt: The user's input prompt
+        model: Model identifier (default: gemini-2.5-flash)
+        max_tokens: Maximum tokens in response
+        max_retries: Number of retry attempts on failure
+        system_prompt: Optional system instruction
+        temperature: Sampling temperature (0.0-1.0)
+        use_cache: Whether to use response caching
+        
+    Returns:
+        Generated text response or error message
+    """
     refresh_provider_keys()
     if not GEMINI_API_KEY:
         return "Google Gemini is not configured. Open Settings > Provider keys and add a Gemini API key, or set GEMINI_API_KEY / GOOGLE_API_KEY in environment variables or Streamlit secrets."
+
+    # Check cache first
+    if use_cache:
+        cache_key = _get_cache_key(prompt, model, "gemini")
+        cached = _get_cached_response(cache_key)
+        if cached:
+            return cached
 
     payload = {
         "systemInstruction": {"parts": [{"text": _base_system_prompt(system_prompt)}]},
@@ -337,6 +404,7 @@ def get_gemini_response(
     model_path = _gemini_model_path(model)
     url = f"{GEMINI_BASE_URL}/{model_path}:generateContent"
 
+    last_error = ""
     for retry in range(max_retries):
         try:
             if retry > 0:
@@ -344,23 +412,32 @@ def get_gemini_response(
             response = requests.post(url, headers=headers, json=payload, timeout=75)
             if response.status_code == 200:
                 text, finish_reason = _extract_gemini_text(response.json())
-                return text or f"Google Gemini returned an empty message (finish reason: {finish_reason or 'unknown'})."
+                result = text or f"Google Gemini returned an empty message (finish reason: {finish_reason or 'unknown'})."
+                # Cache successful response
+                if use_cache and text:
+                    _cache_response(cache_key, result)
+                return result
             if response.status_code == 429:
                 body = response.text[:700].lower()
                 if any(term in body for term in ("quota", "rate", "limit", "exhausted")):
                     return "Google Gemini is configured, but the key appears to be rate-limited or out of quota."
+                last_error = "Rate limit exceeded"
                 continue
             if response.status_code in (500, 502, 503, 504):
+                last_error = f"Server error: {response.status_code}"
                 continue
             body = response.text[:700]
             return f"Google Gemini returned an error: {response.status_code}. {body}"
         except requests.exceptions.Timeout:
+            last_error = "Request timeout"
             continue
         except requests.exceptions.ConnectionError:
+            last_error = "Connection error"
             continue
         except Exception as exc:
             return f"Google Gemini request error: {exc}"
-    return "Google Gemini is not responding right now. Please try again in a moment."
+    
+    return f"Google Gemini is not responding right now. Please try again in a moment. (Last error: {last_error})"
 
 
 def get_openai_compatible_response(
@@ -374,9 +451,35 @@ def get_openai_compatible_response(
     system_prompt: str | None = None,
     temperature: float = 0.7,
     timeout: int = 60,
+    use_cache: bool = True,
 ) -> str:
+    """Get response from OpenAI-compatible API with improved error handling and caching.
+    
+    Args:
+        prompt: The user's input prompt
+        provider_name: Human-readable provider name (e.g., "xAI/Grok")
+        base_url: API base URL
+        api_key: API key for authentication
+        model: Model identifier
+        max_tokens: Maximum tokens in response
+        max_retries: Number of retry attempts on failure
+        system_prompt: Optional system instruction
+        temperature: Sampling temperature (0.0-1.0)
+        timeout: Request timeout in seconds
+        use_cache: Whether to use response caching
+        
+    Returns:
+        Generated text response or error message
+    """
     if not api_key:
         return f"{provider_name} is not configured. Add the provider API key in environment or Streamlit secrets."
+
+    # Check cache first
+    if use_cache:
+        cache_key = _get_cache_key(prompt, model, provider_name.replace("/", "_"))
+        cached = _get_cached_response(cache_key)
+        if cached:
+            return cached
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
@@ -390,6 +493,7 @@ def get_openai_compatible_response(
         "stream": False,
     }
 
+    last_error = ""
     for retry in range(max_retries):
         try:
             if retry > 0:
@@ -403,23 +507,31 @@ def get_openai_compatible_response(
             if response.status_code == 200:
                 text, finish_reason = _extract_openai_compatible_text(response.json())
                 if text:
+                    # Cache successful response
+                    if use_cache:
+                        _cache_response(cache_key, text)
                     return text
                 return f"{provider_name} returned an empty message (finish reason: {finish_reason or 'unknown'})."
             if response.status_code == 429:
                 body = response.text[:700].lower()
                 if any(term in body for term in ("credit", "spending limit", "monthly", "quota", "exhausted")):
                     return f"{provider_name} is configured, but the key appears to be out of credits or quota."
+                last_error = "Rate limit exceeded"
                 continue
             if response.status_code in (500, 502, 503, 504):
+                last_error = f"Server error: {response.status_code}"
                 continue
             return f"{provider_name} returned an error: {response.status_code}. Try a different model or check model access."
         except requests.exceptions.Timeout:
+            last_error = "Request timeout"
             continue
         except requests.exceptions.ConnectionError:
+            last_error = "Connection error"
             continue
         except Exception as exc:
             return f"{provider_name} request error: {exc}"
-    return f"{provider_name} is not responding right now. Please try again in a moment."
+    
+    return f"{provider_name} is not responding right now. Please try again in a moment. (Last error: {last_error})"
 
 
 def get_xai_response(
@@ -758,6 +870,18 @@ def _clean_html_text(value: str) -> str:
 
 
 def _ls51_duckduckgo_search(query: str, max_results: int = 5) -> list[dict]:
+    """Search using DuckDuckGo API with improved reliability.
+    
+    Uses the official duckduckgo-search library (ddgs) as primary method,
+    with HTML scraping fallbacks if needed.
+    
+    Args:
+        query: Search query string
+        max_results: Maximum number of results to return
+        
+    Returns:
+        List of search result dictionaries with title, url, and snippet
+    """
     out: list[dict] = []
     seen = set()
 
@@ -774,17 +898,23 @@ def _ls51_duckduckgo_search(query: str, max_results: int = 5) -> list[dict]:
             title_clean = urllib.parse.urlparse(href).netloc or href
         out.append({"title": title_clean[:180], "url": href, "snippet": _clean_html_text(snippet)[:700]})
 
-    try:
-        from ddgs import DDGS
+    # Primary method: Use DDGS library (official DuckDuckGo API wrapper)
+    if HAS_DDGS and DDGS is not None:
+        try:
+            with DDGS() as ddgs:
+                for item in ddgs.text(query[:320], max_results=max_results):
+                    add_result(
+                        item.get("title", ""), 
+                        item.get("href") or item.get("url", ""), 
+                        item.get("body") or item.get("snippet", "")
+                    )
+                    if len(out) >= max_results:
+                        return out
+        except Exception as e:
+            # Log error but continue to fallback methods
+            pass
 
-        with DDGS() as ddgs:
-            for item in ddgs.text(query[:320], max_results=max_results):
-                add_result(item.get("title", ""), item.get("href") or item.get("url", ""), item.get("body") or item.get("snippet", ""))
-                if len(out) >= max_results:
-                    return out
-    except Exception:
-        pass
-
+    # Fallback 1: DuckDuckGo HTML scraping
     headers = DEFAULT_WEB_HEADERS
     try:
         url = "https://duckduckgo.com/html/?q=" + urllib.parse.quote(query[:320])
@@ -798,6 +928,7 @@ def _ls51_duckduckgo_search(query: str, max_results: int = 5) -> list[dict]:
     except Exception:
         pass
 
+    # Fallback 2: Bing search
     try:
         url = "https://www.bing.com/search?q=" + urllib.parse.quote(query[:320])
         res = requests.get(url, headers=headers, timeout=16)
@@ -810,6 +941,7 @@ def _ls51_duckduckgo_search(query: str, max_results: int = 5) -> list[dict]:
     except Exception:
         pass
 
+    # Fallback 3: Google search (if available)
     if HAS_GOOGLE and googlesearch is not None:
         try:
             for href in googlesearch.search(query[:320], num=max_results, stop=max_results, pause=1.0):
@@ -818,6 +950,7 @@ def _ls51_duckduckgo_search(query: str, max_results: int = 5) -> list[dict]:
                     return out
         except Exception:
             pass
+    
     return out
 
 

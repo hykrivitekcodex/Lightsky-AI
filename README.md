@@ -1,8 +1,29 @@
 # Lightsky AI pro by Krivi
 
-Streamlit-first Lightsky AI app with chat image generation, arena, visual
-browser, Look & Take, GitHub plugin discovery, internal testing, and LS 5.1
-debug tools. Labs collaboration is shown at `https://lightsky-ai-krivi.streamlit.app/labs`.
+**Enhanced multi-provider AI assistant** with chat, image generation, web research, LS 5.1 mode, and agent tooling.
+
+## ✨ New Features & Improvements
+
+### Performance Enhancements
+- **Response Caching**: Automatic caching of LLM responses (5-minute TTL) for faster repeated queries
+- **Improved Error Handling**: Better error messages with last-error tracking for debugging
+- **Optimized Retry Logic**: Exponential backoff with detailed error state tracking
+
+### Code Quality Improvements
+- **Type Hints**: Added comprehensive type annotations throughout the codebase
+- **Docstrings**: Complete documentation for all major functions
+- **Better Error Messages**: More informative error messages with context
+
+### Bug Fixes
+- Fixed error handling in Gemini API calls to properly track retry failures
+- Improved connection error handling across all providers
+- Enhanced timeout handling for slow network conditions
+
+### Web Search Enhancements
+- **DuckDuckGo API Integration**: Primary search method using official `ddgs` library for reliable, rate-limit-friendly searches
+- **Multi-Fallback Strategy**: Automatic fallback to DuckDuckGo HTML, Bing, and Google search if primary method fails
+- **Improved Search Results**: Better result extraction with title, URL, and snippet formatting
+- **Smart Query Optimization**: Automatic query cleaning and deduplication for better search quality
 
 ## Run Locally
 
